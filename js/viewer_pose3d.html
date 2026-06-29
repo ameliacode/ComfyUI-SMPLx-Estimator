@@ -18,8 +18,20 @@
 </head>
 <body>
     <div id="loading">Waiting for pose data…</div>
-    <script src="./three/viewer-bundle-three.js"></script>
-    <script>
+    <!-- three.js via CDN importmap (comfy-3d-viewers convention) -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    <script type="module">
+        import * as THREE from 'three';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { TransformControls } from 'three/addons/controls/TransformControls.js';
+
         // ── H36M-17 skeleton ──────────────────────────────────────────────────
         const H36M_LIMBS = [
             [0,1],[1,2],[2,3],              // left leg

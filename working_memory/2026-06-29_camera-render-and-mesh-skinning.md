@@ -168,6 +168,24 @@ User: "sole nlf smplx" — committed a checkpoint (3afd6b0) then stripped the pa
 - The ONLY pipeline now: image -> NLFSMPLXEstimator (+WholeBodyHandDetector) -> SMPLXEditor.
   ClickPose/2D-edit path is gone (no longer "2D-first"); HITL is purely the 3D editor.
 
+## Feature #8 — Align viewer to comfy-3d-viewers conventions (DONE)
+Checked our 3D viewer against github.com/PozzettiAndrea/comfy-3d-viewers (cloned +
+read source, not just README). Their SMPL viewer (viewer_smpl_camera.html) uses
+three@0.160 ESM via CDN importmap + OrbitControls, view-only; extensionFolder.js
+helper + getViewerUrl; postMessage data flow. Ours already matched the pattern but
+bundled three locally + added editing. User chose "adopt their conventions":
+- viewer_pose3d.html: replaced ./three/viewer-bundle-three.js with their importmap
+  (three@0.160.0 from cdn.jsdelivr + three/addons/) and `<script type="module">`
+  importing THREE/OrbitControls/TransformControls. Editing code unchanged.
+- Added js/utils/extensionFolder.js (EXTENSION_FOLDER + getViewerUrl) mirroring
+  theirs; extension.js imports getViewerUrl("viewer_pose3d"), removed inline
+  detectExtensionFolder.
+- Deleted js/three/ (local bundle no longer used). js/ = extension.js, viewer_pose3d.html,
+  utils/extensionFolder.js.
+- TRADEOFF: viewer now needs INTERNET (CDN three.js) at runtime — offline use would
+  need a vendored three or self-host. Kept all TransformControls editing (theirs lacks it).
+- Node display names shortened: "SMPL-X Estimator", "Hand Detector", "SMPL-X Editor".
+
 ## Suggested graph wiring
 ClickPose ─┬─ POSE_KEYPOINTS ─────────────► SMPLXFit ─► SMPLXEditor
            └─ (image) ─► WholeBodyHandDetector ─ HAND_KEYPOINTS ─► SMPLXFit.hand_keypoints

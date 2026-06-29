@@ -1,28 +1,10 @@
 import { app } from "../../scripts/app.js";
+import { getViewerUrl } from "./utils/extensionFolder.js";
 
 // ── helpers ─────────────────────────────────────────────────────────────────────
 
 function getWidget(node, name) {
     return node.widgets?.find((widget) => widget.name === name) ?? null;
-}
-
-function detectExtensionFolder() {
-    try {
-        if (typeof import.meta !== "undefined" && import.meta.url) {
-            const match = import.meta.url.match(/\/extensions\/([^/]+)\//);
-            if (match) return match[1];
-        }
-        const scripts = document.getElementsByTagName("script");
-        for (let i = scripts.length - 1; i >= 0; i--) {
-            const src = scripts[i].src;
-            if (!src) continue;
-            const match = src.match(/\/extensions\/([^/]+)\//);
-            if (match) return match[1];
-        }
-    } catch (_) {
-        // Best effort only.
-    }
-    return null;
 }
 
 // ── embedded three.js SMPL-X editor (iframe viewer) ───────────────────────────────
@@ -33,10 +15,7 @@ function createEmbeddedNativePose3DEditor(node) {
     const NODE_CHROME_HEIGHT = 140;
     const NODE_MIN_HEIGHT = VIEWER_HEIGHT + NODE_CHROME_HEIGHT;
 
-    const extensionFolder = detectExtensionFolder();
-    const viewerUrl = extensionFolder
-        ? `/extensions/${extensionFolder}/viewer_pose3d.html?v=${Date.now()}`
-        : new URL("./viewer_pose3d.html", import.meta.url).href + `?v=${Date.now()}`;
+    const viewerUrl = getViewerUrl("viewer_pose3d");
 
     const container = document.createElement("div");
     Object.assign(container.style, {

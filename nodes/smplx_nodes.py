@@ -15,7 +15,6 @@ import os
 import re
 from typing import Optional
 
-import cv2
 import numpy as np
 import torch
 
@@ -92,13 +91,10 @@ def _parse_csv(s, n):
     return out
 
 
-def _apply_params(smplx_dict, *, betas="", expression="", rot_x=0.0, rot_y=0.0,
-                  rot_z=0.0, tx=0.0, ty=0.0, tz=0.0, jaw_open=0.0):
+def _apply_params(smplx_dict, *, betas="", expression="", jaw_open=0.0):
     """
     Direct SMPL-X parameter edits:
       betas/expression : absolute (CSV; empty = keep current),
-      rot_*            : global-orientation OFFSET in degrees (composed, not added),
-      t*               : translation OFFSET in metres,
       jaw_open         : 0..1 mouth open (jaw pitch).
     """
     out = dict(smplx_dict)
@@ -108,14 +104,6 @@ def _apply_params(smplx_dict, *, betas="", expression="", rot_x=0.0, rot_y=0.0,
     e = _parse_csv(expression, 10)
     if e is not None:
         out["expression"] = e
-    if rot_x or rot_y or rot_z:
-        Rc, _ = cv2.Rodrigues(np.asarray(out["global_orient"], np.float32).reshape(3))
-        Ro, _ = cv2.Rodrigues(np.deg2rad([rot_x, rot_y, rot_z]).astype(np.float32))
-        rvec, _ = cv2.Rodrigues(Ro @ Rc)
-        out["global_orient"] = rvec.reshape(3).astype(np.float32)
-    if tx or ty or tz:
-        out["transl"] = (np.asarray(out["transl"], np.float32)
-                         + np.array([tx, ty, tz], np.float32))
     if jaw_open:
         out["jaw_pose"] = np.array([float(jaw_open) * 0.5, 0.0, 0.0], np.float32)
     return out
@@ -237,18 +225,6 @@ class SMPLXEditor:
                                                      "coefficients. Empty = neutral."}),
                 "jaw_open": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
                                        "tooltip": "Mouth/jaw open, 0..1."}),
-                "rot_x": ("FLOAT", {"default": 0.0, "min": -180.0, "max": 180.0, "step": 1.0,
-                                    "tooltip": "Global rotation offset about X (deg, pitch)."}),
-                "rot_y": ("FLOAT", {"default": 0.0, "min": -180.0, "max": 180.0, "step": 1.0,
-                                    "tooltip": "Global rotation offset about Y (deg, turn)."}),
-                "rot_z": ("FLOAT", {"default": 0.0, "min": -180.0, "max": 180.0, "step": 1.0,
-                                    "tooltip": "Global rotation offset about Z (deg, roll)."}),
-                "tx": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.01,
-                                 "tooltip": "Translation offset X (m)."}),
-                "ty": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.01,
-                                 "tooltip": "Translation offset Y (m)."}),
-                "tz": ("FLOAT", {"default": 0.0, "min": -2.0, "max": 2.0, "step": 0.01,
-                                 "tooltip": "Translation offset Z (m)."}),
             },
         }
 
@@ -260,26 +236,22 @@ class SMPLXEditor:
 
     @classmethod
     def IS_CHANGED(cls, smplx, size, reik_iters, device, seed, corrections=None, camera=None,
-                   left_grasp=0.0, right_grasp=0.0, betas="", expression="", jaw_open=0.0,
-                   rot_x=0.0, rot_y=0.0, rot_z=0.0, tx=0.0, ty=0.0, tz=0.0):
+                   left_grasp=0.0, right_grasp=0.0, betas="", expression="", jaw_open=0.0):
         h = hashlib.sha256()
         for k in ("global_orient", "body_pose", "betas", "transl",
                   "left_hand_pose", "right_hand_pose"):
             h.update(np.asarray(smplx[k], np.float32).tobytes())
         h.update(repr((size, reik_iters, device, seed, corrections or "", camera or "",
-                       left_grasp, right_grasp, betas, expression, jaw_open,
-                       rot_x, rot_y, rot_z, tx, ty, tz)).encode())
+                       left_grasp, right_grasp, betas, expression, jaw_open)).encode())
         return h.hexdigest()
 
     def edit(self, smplx, size, reik_iters, device, seed, corrections=None, camera=None,
-             left_grasp=0.0, right_grasp=0.0, betas="", expression="", jaw_open=0.0,
-             rot_x=0.0, rot_y=0.0, rot_z=0.0, tx=0.0, ty=0.0, tz=0.0):
+             left_grasp=0.0, right_grasp=0.0, betas="", expression="", jaw_open=0.0):
         dev = resolve_device(device)
         model = load_smplx(smplx["model_path"], smplx.get("gender", "neutral"), dev)
 
-        # 1) direct parameter edits first (shape/expression/global) so IK uses them
-        out = _apply_params(smplx, betas=betas, expression=expression, jaw_open=jaw_open,
-                            rot_x=rot_x, rot_y=rot_y, rot_z=rot_z, tx=tx, ty=ty, tz=tz)
+        # 1) direct parameter edits first (shape/expression) so IK uses them
+        out = _apply_params(smplx, betas=betas, expression=expression, jaw_open=jaw_open)
 
         # 2) joint drags -> body_pose (idx 0-21) and/or hand_pose (idx 25-54) IK
         if corrections and corrections.strip():

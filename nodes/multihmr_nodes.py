@@ -73,25 +73,35 @@ class MultiHMREstimator:
         h.update(repr((multihmr_ckpt_path, smplx_model_path, gender, device, det_thresh)).encode())
         return h.hexdigest()
 
-    def estimate(self, image, multihmr_ckpt_path, smplx_model_path, gender, device, det_thresh):
-        dev = resolve_device(device)
-        rgb01 = image[0].cpu().numpy().astype(np.float32)        # (H,W,3) [0,1]
-
-        model, img_size = load_multihmr(multihmr_ckpt_path, smplx_model_path, dev)
-        model.to(dev)
+    def _run(self, run_dev, image_rgb01, multihmr_ckpt_path, smplx_model_path, gender, det_thresh):
+        model, img_size = load_multihmr(multihmr_ckpt_path, smplx_model_path, run_dev)
+        model.to(run_dev)
         try:
-            params = estimate_smplx_params(model, img_size, rgb01, dev, det_thresh=det_thresh)
+            params = estimate_smplx_params(model, img_size, image_rgb01, run_dev,
+                                           det_thresh=det_thresh)
         finally:
-            if dev != "cpu":                                     # free GPU for the render
+            if run_dev != "cpu":                                 # free GPU for the render
                 model.to("cpu")
                 torch.cuda.empty_cache()
         print("[multihmr] estimated full SMPL-X (body+hands+expression) from "
-              f"{rgb01.shape[1]}x{rgb01.shape[0]}")
+              f"{image_rgb01.shape[1]}x{image_rgb01.shape[0]} on {run_dev}")
 
-        smplx_model = load_smplx(smplx_model_path, gender, dev)
+        smplx_model = load_smplx(smplx_model_path, gender, run_dev)
         smplx_dict = _smplx_dict(params, gender, smplx_model_path)
-        verts, faces, joints = _forward_mesh(smplx_dict, smplx_model, dev)
+        verts, faces, joints = _forward_mesh(smplx_dict, smplx_model, run_dev)
         smplx_dict["joints_3d"] = joints
         smplx_dict, verts = _ground(smplx_dict, verts)
-        pose, _, _, _ = render_maps(verts, faces, dev, size=512, ground=False)
+        pose, _, _, _ = render_maps(verts, faces, run_dev, size=512, ground=False)
         return {"ui": {}, "result": (smplx_dict, _img(pose))}
+
+    def estimate(self, image, multihmr_ckpt_path, smplx_model_path, gender, device, det_thresh):
+        dev = resolve_device(device)
+        rgb01 = image[0].cpu().numpy().astype(np.float32)        # (H,W,3) [0,1]
+        try:
+            return self._run(dev, rgb01, multihmr_ckpt_path, smplx_model_path, gender, det_thresh)
+        except torch.OutOfMemoryError:
+            if dev == "cpu":
+                raise
+            torch.cuda.empty_cache()
+            print("[multihmr] CUDA out of memory (GPU likely busy) — retrying on CPU (slower).")
+            return self._run("cpu", rgb01, multihmr_ckpt_path, smplx_model_path, gender, det_thresh)

@@ -143,7 +143,8 @@ def estimate_smplx_params(model, img_size, image_rgb01, device, det_thresh=0.3):
     """Run Multi-HMR; return full SMPL-X params for the most prominent person."""
     x = _preprocess(image_rgb01, img_size, device)
     K = _camera(img_size, device)
-    with torch.no_grad():
+    use_amp = str(device).startswith("cuda")                 # fp16 like the demo (saves memory)
+    with torch.no_grad(), torch.autocast(device_type="cuda", dtype=torch.float16, enabled=use_amp):
         humans = model(x, is_training=False, nms_kernel_size=1,
                        det_thresh=float(det_thresh), K=K)
     if not humans:

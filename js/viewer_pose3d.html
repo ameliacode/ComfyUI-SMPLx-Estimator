@@ -2,22 +2,136 @@
 <html>
 <head>
     <meta charset="utf-8">
+    <title>SMPL-X Editor</title>
     <style>
-        body { margin: 0; overflow: hidden; background: #2a2a2a; }
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #2a2a2a;
+            font-family: monospace;
+            width: 100%;
+            height: 100vh;
+        }
+        #viewerContainer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+        }
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
         #loading {
             position: absolute;
             top: 50%;
             left: 50%;
             transform: translate(-50%, -50%);
-            color: #888;
-            font-size: 13px;
-            font-family: monospace;
-            pointer-events: none;
+            color: white;
+            font-size: 14px;
+            text-align: center;
+            z-index: 10;
         }
+        #controls {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(26, 26, 26, 0.95);
+            border-top: 1px solid #444;
+            padding: 10px;
+            color: white;
+            font-size: 11px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+            z-index: 100;
+            max-height: 40%;
+            overflow-y: auto;
+        }
+        #controls button {
+            background: #4a4a4a;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            border-radius: 3px;
+            cursor: pointer;
+            font-family: monospace;
+            font-size: 12px;
+            white-space: nowrap;
+        }
+        #controls button:hover { background: #5a5a5a; }
+        #controls button:active { background: #3a3a3a; }
+        .control-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            align-items: center;
+        }
+        .checkbox-label {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 5px 0;
+        }
+        .checkbox-label input[type="checkbox"] { cursor: pointer; }
+        #status { color: #888; font-size: 11px; margin-top: 5px; }
     </style>
 </head>
 <body>
-    <div id="loading">Waiting for pose data…</div>
+    <div id="viewerContainer">
+        <canvas id="canvas"></canvas>
+        <div id="loading">Waiting for pose data…</div>
+    </div>
+
+    <div id="controls">
+        <div><strong>SMPL-X Editor</strong></div>
+
+        <div class="control-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="showSkeleton" checked>
+                <span>Show Skeleton</span>
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" id="showMesh" checked>
+                <span>Show Mesh</span>
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" id="xraySkeleton" checked>
+                <span>X-Ray Skeleton</span>
+            </label>
+        </div>
+
+        <div class="control-group">
+            <button id="resetPose">Reset Edits</button>
+            <button id="resetCamera">Reset Camera</button>
+        </div>
+
+        <div class="control-group">
+            <label class="checkbox-label">
+                <input type="checkbox" id="showGrid" checked>
+                <span>Show Grid</span>
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" id="showAxes" checked>
+                <span>Show Axes</span>
+            </label>
+            <label class="checkbox-label">
+                <input type="checkbox" id="wireframeMode">
+                <span>Wireframe Mode</span>
+            </label>
+        </div>
+
+        <div class="control-group">
+            <button id="takeScreenshot">Take Screenshot</button>
+            <button id="exportGLB">Export GLB (Current Pose)</button>
+        </div>
+
+        <div id="status">No mesh loaded</div>
+    </div>
     <!-- three.js via CDN importmap (comfy-3d-viewers convention) -->
     <script type="importmap">
     {
@@ -31,6 +145,7 @@
         import * as THREE from 'three';
         import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
         import { TransformControls } from 'three/addons/controls/TransformControls.js';
+        import { GLTFExporter } from 'three/addons/exporters/GLTFExporter.js';
 
         // ── H36M-17 skeleton ──────────────────────────────────────────────────
         const H36M_LIMBS = [
@@ -57,10 +172,18 @@
         const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
         camera.position.set(2.2, 1.8, 2.8);
 
-        const renderer = new THREE.WebGLRenderer({ antialias: true });
-        renderer.setSize(window.innerWidth, window.innerHeight);
+        const canvasEl = document.getElementById('canvas');
+        const viewerContainer = document.getElementById('viewerContainer');
+        const renderer = new THREE.WebGLRenderer({ canvas: canvasEl, antialias: true, preserveDrawingBuffer: true });
         renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        document.body.appendChild(renderer.domElement);
+        function sizeRenderer() {
+            const w = viewerContainer.clientWidth || window.innerWidth;
+            const h = viewerContainer.clientHeight || window.innerHeight;
+            renderer.setSize(w, h, false);
+            camera.aspect = w / Math.max(h, 1);
+            camera.updateProjectionMatrix();
+        }
+        sizeRenderer();
 
         const controls = new OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
@@ -91,7 +214,13 @@
         fill.position.set(-5, -5, -7);
         scene.add(fill);
 
-        scene.add(new THREE.GridHelper(4, 20, 0x444444, 0x222222));
+        const grid = new THREE.GridHelper(4, 20, 0x444444, 0x222222);
+        scene.add(grid);
+        const axes = new THREE.AxesHelper(0.5);
+        scene.add(axes);
+
+        let lastPoseData = null;       // last loaded pose (for "Reset Edits")
+        let recenterCamera = null;     // re-fit closure (for "Reset Camera")
 
         // ── Bone cylinders (pre-created, scaled at runtime) ───────────────────
         const boneGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 8);
@@ -270,6 +399,7 @@
 
         function setPoseEditor(pose3d) {
             editorActive = true;
+            lastPoseData = pose3d;                 // for "Reset Edits"
             editorLimbs = pose3d.limbs || [];
             const J = pose3d.joints_3d;            // TRUE metric, all 55 joints
             const editable = pose3d.editable || J.map((_, i) => i);
@@ -328,17 +458,20 @@
             });
             updateEditorBones();
 
-            // fit camera to the true-metric body
+            // fit camera to the true-metric body (stored so "Reset Camera" can re-fit)
             const box = new THREE.Box3();
             J.forEach(p => box.expandByPoint(new THREE.Vector3(...p)));
             const center = box.getCenter(new THREE.Vector3());
             const size = box.getSize(new THREE.Vector3());
             const dist = Math.max(size.x, size.y, size.z, 0.8) * 2.4;
-            camera.position.set(center.x + dist, center.y + dist * 0.5, center.z + dist);
-            controls.target.copy(center);
             controls.minDistance = 0.2;
             controls.maxDistance = Math.max(12, dist * 4);
-            controls.update();
+            recenterCamera = () => {
+                camera.position.set(center.x + dist, center.y + dist * 0.5, center.z + dist);
+                controls.target.copy(center);
+                controls.update();
+            };
+            recenterCamera();
             // hide the read-only H36M bones if any were shown
             boneMeshes.forEach(b => (b.visible = false));
             document.getElementById("loading").style.display = "none";
@@ -454,10 +587,54 @@
         });
 
         // ── Resize ────────────────────────────────────────────────────────────
-        window.addEventListener("resize", () => {
-            camera.aspect = window.innerWidth / window.innerHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth, window.innerHeight);
+        window.addEventListener("resize", sizeRenderer);
+        new ResizeObserver(sizeRenderer).observe(viewerContainer);
+
+        // ── UI controls (comfy-3d-viewers FBX-viewer style) ────────────────────
+        const $ = (id) => document.getElementById(id);
+        const setStatus = (t) => { const s = $("status"); if (s) s.textContent = t; };
+
+        $("showSkeleton").addEventListener("change", (e) => {
+            const v = e.target.checked;
+            jointSpheres.forEach(s => { if (s) s.visible = v; });
+            editorBones.forEach(b => { if (b) b.visible = v; });
+        });
+        $("showMesh").addEventListener("change", (e) => { if (bodyMesh) bodyMesh.visible = e.target.checked; });
+        $("xraySkeleton").addEventListener("change", (e) => {
+            const xray = e.target.checked;
+            jointSpheres.forEach(s => { if (s) { s.material.depthTest = !xray; s.material.needsUpdate = true; } });
+        });
+        $("showGrid").addEventListener("change", (e) => { grid.visible = e.target.checked; });
+        $("showAxes").addEventListener("change", (e) => { axes.visible = e.target.checked; });
+        $("wireframeMode").addEventListener("change", (e) => { if (bodyMesh) bodyMesh.material.wireframe = e.target.checked; });
+
+        $("resetPose").addEventListener("click", () => {
+            if (!lastPoseData) return;
+            if (tcontrols) tcontrols.detach();
+            setPoseEditor(lastPoseData);                       // rebuild at bind pose, clears drags
+            window.parent.postMessage({ type: "POSE3D_CORRECTIONS", corrections: {} }, "*");
+            setStatus("Edits reset");
+        });
+        $("resetCamera").addEventListener("click", () => { if (recenterCamera) recenterCamera(); });
+
+        $("takeScreenshot").addEventListener("click", () => {
+            renderer.render(scene, camera);
+            const a = document.createElement("a");
+            a.download = "smplx_pose.png";
+            a.href = renderer.domElement.toDataURL("image/png");
+            a.click();
+            setStatus("Screenshot saved");
+        });
+        $("exportGLB").addEventListener("click", () => {
+            if (!bodyMesh) { setStatus("No mesh to export"); return; }
+            new GLTFExporter().parse(bodyMesh, (gltf) => {
+                const blob = new Blob([gltf], { type: "model/gltf-binary" });
+                const a = document.createElement("a");
+                a.download = "smplx_pose.glb";
+                a.href = URL.createObjectURL(blob);
+                a.click();
+                setStatus("Exported GLB (current pose)");
+            }, () => setStatus("GLB export failed"), { binary: true });
         });
 
         // ── Render loop ───────────────────────────────────────────────────────

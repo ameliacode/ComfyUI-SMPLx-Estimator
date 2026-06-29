@@ -186,6 +186,23 @@ bundled three locally + added editing. User chose "adopt their conventions":
   need a vendored three or self-host. Kept all TransformControls editing (theirs lacks it).
 - Node display names shortened: "SMPL-X Estimator", "Hand Detector", "SMPL-X Editor".
 
+## Feature #9 — SMPL-X Editor UI matched to SAM3DBody/comfy-3d-viewers FBX viewer
+SAM3DBody's viz node (SAM3DBodyPreviewRiggedMesh) uses comfy-3d-viewers' FBX viewer
+(copy_viewer("fbx")) = three.js + bottom controls panel. Replicated that UI in
+js/viewer_pose3d.html, keeping our joint editing:
+- Same CSS/layout: #viewerContainer>#canvas + bottom #controls panel
+  (rgba(26,26,26,.95), control-group rows, checkbox-label, button styling, #status).
+- Controls wired to our scene: Show Skeleton (jointSpheres+editorBones), Show Mesh
+  (bodyMesh), X-Ray Skeleton (sphere depthTest), Show Grid, Show Axes (added
+  AxesHelper), Wireframe (bodyMesh.material.wireframe), Reset Edits (re-run
+  setPoseEditor(lastPoseData)+clear corrections), Reset Camera (stored recenterCamera),
+  Take Screenshot (canvas toDataURL, renderer preserveDrawingBuffer=true),
+  Export GLB (GLTFExporter from three/addons).
+- renderer now binds to #canvas + sizes to container (sizeRenderer + ResizeObserver).
+- Deviations from "exact": dropped "Export FBX" (no browser FBX exporter); "Reset to
+  Rest Pose" -> "Reset Edits" (ours resets to loaded estimate, not T-pose).
+- Verified: module syntax OK (node --check w/ stubbed imports), 13 UI ids present.
+
 ## Suggested graph wiring
 ClickPose ─┬─ POSE_KEYPOINTS ─────────────► SMPLXFit ─► SMPLXEditor
            └─ (image) ─► WholeBodyHandDetector ─ HAND_KEYPOINTS ─► SMPLXFit.hand_keypoints

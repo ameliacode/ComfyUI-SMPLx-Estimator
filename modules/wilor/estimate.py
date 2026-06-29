@@ -32,15 +32,20 @@ _MANO_DIR = os.path.join(WILOR_DIR, "mano_data")
 _cache: dict = {}
 
 
-def load_wilor(device):
-    """Load (and cache) the WiLoR model + YOLO hand detector for a device."""
-    if device in _cache:
-        return _cache[device]
-    for p in (DEFAULT_WILOR_CKPT, DEFAULT_WILOR_DETECTOR):
+def load_wilor(ckpt_path=DEFAULT_WILOR_CKPT, detector_path=DEFAULT_WILOR_DETECTOR, device="cuda"):
+    """Load (and cache) the WiLoR model + YOLO hand detector.
+
+    ckpt_path / detector_path are the weights (folder_paths-resolved by the Load
+    node); the model config + MANO files come from the WiLoR code clone (WILOR_DIR).
+    """
+    key = (ckpt_path, detector_path, device)
+    if key in _cache:
+        return _cache[key]
+    for p in (ckpt_path, detector_path):
         if not os.path.isfile(p):
             raise FileNotFoundError(
                 f"WiLoR asset missing: {p!r}. Download detector.pt + wilor_final.ckpt from "
-                f"huggingface.co/spaces/rolpotamias/WiLoR into {WILOR_DIR}/pretrained_models/."
+                f"huggingface.co/spaces/rolpotamias/WiLoR into ComfyUI/models/wilor/."
             )
     if WILOR_DIR not in sys.path:
         sys.path.insert(0, WILOR_DIR)
@@ -59,11 +64,11 @@ def load_wilor(device):
     cfg.MANO.MEAN_PARAMS = os.path.join(_MANO_DIR, "mano_mean_params.npz")
     cfg.freeze()
 
-    model = WiLoR.load_from_checkpoint(DEFAULT_WILOR_CKPT, strict=False, cfg=cfg,
+    model = WiLoR.load_from_checkpoint(ckpt_path, strict=False, cfg=cfg,
                                        init_renderer=False).to(device).eval()
-    detector = YOLO(DEFAULT_WILOR_DETECTOR)
-    _cache[device] = (model, cfg, detector)
-    return _cache[device]
+    detector = YOLO(detector_path)
+    _cache[key] = (model, cfg, detector)
+    return _cache[key]
 
 
 def estimate_hand_pose(model, cfg, detector, image_rgb01, device, conf=0.3):
@@ -75,7 +80,7 @@ def estimate_hand_pose(model, cfg, detector, image_rgb01, device, conf=0.3):
     from wilor.datasets.vitdet_dataset import ViTDetDataset
 
     bgr = cv2.cvtColor((np.clip(image_rgb01, 0, 1) * 255).astype(np.uint8), cv2.COLOR_RGB2BGR)
-    det = detector(bgr, conf=conf, verbose=False)[0]
+    det = detector(bgr, conf=conf, verbose=False, device=device)[0]
     boxes, right = [], []
     for d in det:
         b = d.boxes.data.cpu().numpy().squeeze()

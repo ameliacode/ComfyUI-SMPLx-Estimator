@@ -5,9 +5,15 @@ from .nodes import NODE_CLASS_MAPPINGS, NODE_CLASSES
 WEB_DIRECTORY = "./js"
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "NLFSMPLXEstimator": "SMPL-X Estimator (NLF)",
-    "MultiHMREstimator": "SMPL-X Estimator (Multi-HMR)",
-    "WiLoRHandEstimator": "Hand Estimator (WiLoR)",
+    "LoadNLF": "Load NLF",
+    "DownloadAndLoadNLF": "Download & Load NLF",
+    "LoadMultiHMR": "Load Multi-HMR",
+    "DownloadAndLoadMultiHMR": "Download & Load Multi-HMR",
+    "LoadWiLoR": "Load WiLoR",
+    "DownloadAndLoadWiLoR": "Download & Load WiLoR",
+    "NLFSMPLXEstimator": "Body: NLF",
+    "MultiHMREstimator": "Full Body: Multi-HMR",
+    "WiLoRHandEstimator": "Hand: WiLoR",
     "SMPLXEditor": "SMPL-X Editor",
 }
 

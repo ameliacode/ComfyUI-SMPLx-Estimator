@@ -30,16 +30,51 @@ _MEAN_PARAMS = "/home/wswg3/github/ComfyUI/models/smpl_mean_params.npz"
 
 _RFIX = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]], np.float32)   # OpenCV cam -> Y-up
 _cache: dict = {}
+_Model = None            # captured Multi-HMR Model class
+_normalize_rgb = None    # captured utils.image.normalize_rgb
+_get_focal = None        # captured utils.camera.get_focalLength_from_fieldOfView
 
 
 def _prepare_imports(smplx_parent):
-    """Add Multi-HMR to sys.path and point its asset paths at our files."""
-    if MULTIHMR_DIR not in sys.path:
-        sys.path.insert(0, MULTIHMR_DIR)
-    import blocks.smpl_layer as _sl
-    _sl.SMPLX_DIR = smplx_parent                 # smplx.create(SMPLX_DIR,'smplx',...)
-    import model as _m
-    _m.MEAN_PARAMS = _MEAN_PARAMS                 # np.load at Model init (buffers overwritten by ckpt)
+    """
+    Import Multi-HMR's ``model``/``blocks``/``utils`` in ISOLATION from ComfyUI's own
+    top-level ``utils``/``model``/``blocks`` packages.
+
+    ComfyUI ships its own ``utils`` package (already in sys.modules), so importing
+    Multi-HMR normally makes ``from utils import inverse_perspective_projection``
+    resolve to ComfyUI's ``utils`` and fail. We temporarily evict those names from
+    sys.modules, import from MULTIHMR_DIR, capture the symbols we need (they keep
+    their own module globals alive via the bound references), then restore ComfyUI's
+    entries so the rest of ComfyUI keeps working.
+    """
+    global _Model, _normalize_rgb, _get_focal
+    if _Model is not None:
+        return
+    import importlib
+
+    def _match(n):
+        return n in ("utils", "blocks", "model") or n.startswith(("utils.", "blocks.", "model."))
+
+    saved = {n: m for n, m in list(sys.modules.items()) if _match(n)}
+    for n in saved:
+        del sys.modules[n]
+    sys.path.insert(0, MULTIHMR_DIR)
+    try:
+        _normalize_rgb = importlib.import_module("utils.image").normalize_rgb
+        _get_focal = importlib.import_module("utils.camera").get_focalLength_from_fieldOfView
+        sl = importlib.import_module("blocks.smpl_layer")
+        sl.SMPLX_DIR = smplx_parent                  # smplx.create(SMPLX_DIR,'smplx',...)
+        mh_model = importlib.import_module("model")
+        mh_model.MEAN_PARAMS = _MEAN_PARAMS          # np.load at Model init (buffers overwritten by ckpt)
+        _Model = mh_model.Model
+    finally:
+        try:
+            sys.path.remove(MULTIHMR_DIR)
+        except ValueError:
+            pass
+        for n in [n for n in list(sys.modules) if _match(n)]:
+            del sys.modules[n]                       # drop Multi-HMR's entries
+        sys.modules.update(saved)                    # restore ComfyUI's
 
 
 def load_multihmr(ckpt_path, smplx_parent, device):
@@ -54,14 +89,13 @@ def load_multihmr(ckpt_path, smplx_parent, device):
     if key in _cache:
         return _cache[key]
     _prepare_imports(smplx_parent)
-    from model import Model
 
     # weights_only=False: the ckpt stores argparse.Namespace (trusted Naver source).
     ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
     kwargs = {k: v for k, v in vars(ckpt["args"]).items()}
     kwargs["type"] = ckpt["args"].train_return_type
     kwargs["img_size"] = ckpt["args"].img_size[0]
-    model = Model(**kwargs).to(device)
+    model = _Model(**kwargs).to(device)
     model.load_state_dict(ckpt["model_state_dict"], strict=False)
     model.eval()
     _cache[key] = (model, int(kwargs["img_size"]))
@@ -71,19 +105,17 @@ def load_multihmr(ckpt_path, smplx_parent, device):
 def _preprocess(image_rgb01, img_size, device):
     """ComfyUI IMAGE frame (H,W,3 float [0,1]) -> normalized (1,3,S,S) tensor."""
     from PIL import Image, ImageOps
-    from utils import normalize_rgb
     arr = (np.clip(np.asarray(image_rgb01, np.float32), 0, 1) * 255).astype(np.uint8)
     pil = Image.fromarray(arr).convert("RGB")
     pil = ImageOps.contain(pil, (img_size, img_size))      # keep aspect
     pil = ImageOps.pad(pil, size=(img_size, img_size))     # pad to square (zeros)
-    x = normalize_rgb(np.asarray(pil))                     # (3,S,S) float, ImageNet norm
+    x = _normalize_rgb(np.asarray(pil))                    # (3,S,S) float, ImageNet norm
     return torch.from_numpy(x).unsqueeze(0).to(device)
 
 
 def _camera(img_size, device, fov=60.0):
-    from utils.camera import get_focalLength_from_fieldOfView
     K = torch.eye(3)
-    f = get_focalLength_from_fieldOfView(fov=fov, img_size=img_size)
+    f = _get_focal(fov=fov, img_size=img_size)
     K[0, 0] = K[1, 1] = f
     K[0, 2] = K[1, 2] = img_size // 2
     return K.unsqueeze(0).to(device)

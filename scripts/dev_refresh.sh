@@ -31,7 +31,7 @@ REPO="/home/wswg3/project/comfyui-mocap"
 HOST="127.0.0.1"
 PORT="8188"
 NODE_FOLDER="comfyui-mocap"
-EXPECTED_NODES=("MultiHMREstimator" "SMPLXEditor")
+EXPECTED_NODES=("NLFSMPLXEstimator" "MultiHMREstimator" "SMPLXEditor")
 READY_TIMEOUT=90   # seconds to wait for the server to answer
 
 RUN_TESTS=0

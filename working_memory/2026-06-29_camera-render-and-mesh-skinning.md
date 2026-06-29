@@ -231,6 +231,18 @@ expression+real betas+transl), NO mmcv, modern torch.
   Old NLF torchscript + vitpose onnx now unused on disk (gitignored).
 - Pipeline now: image -> SMPL-X Estimator (Multi-HMR) -> SMPL-X Editor. 2 nodes total.
 
+## Feature #11 — Keep BOTH estimators (NLF restored alongside Multi-HMR)
+User: "NLF is better for robust motion, do not kill that." Restored NLF as a 2nd
+estimator option (NOT the hand-detector hack — that caused melt). Now 3 nodes:
+- **SMPL-X Estimator (NLF)** = NLFSMPLXEstimator — robust body/global pose, SMPL->SMPL-X,
+  betas=0 (neutral), FLAT hands/face. Best for robust motion; pose hands in the editor.
+- **SMPL-X Estimator (Multi-HMR)** = MultiHMREstimator — expressive: body+hands+face+real betas.
+- **SMPL-X Editor** = SMPLXEditor.
+Both estimators -> SMPL-X Editor; both have CPU-fallback on CUDA OOM.
+modules/nlf restored from git (70ad75d~1); nodes/nlf_nodes.py rewritten clean (no
+hand_keypoints, no _apply_estimated_hands). NLF weights at
+ComfyUI/models/nlf/nlf_l_multi_0.3.2.torchscript (493MB).
+
 ## Suggested graph wiring
 ClickPose ─┬─ POSE_KEYPOINTS ─────────────► SMPLXFit ─► SMPLXEditor
            └─ (image) ─► WholeBodyHandDetector ─ HAND_KEYPOINTS ─► SMPLXFit.hand_keypoints

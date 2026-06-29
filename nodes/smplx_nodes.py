@@ -25,7 +25,6 @@ from ..modules.smplx_fit.joint_maps import (
 )
 from ..modules.smplx_fit.render import render_maps
 from ..modules.smplx_fit.skin import editable_skin_weights
-from ..modules.wholebody.hands import curls_to_hand_pose
 
 
 def _img(arr: np.ndarray) -> torch.Tensor:
@@ -106,24 +105,6 @@ def _apply_params(smplx_dict, *, betas="", expression="", jaw_open=0.0):
         out["expression"] = e
     if jaw_open:
         out["jaw_pose"] = np.array([float(jaw_open) * 0.5, 0.0, 0.0], np.float32)
-    return out
-
-
-def _apply_estimated_hands(smplx_dict: dict, model, hand_keypoints) -> dict:
-    """Set hand_pose from WholeBodyHandDetector per-finger curls (if provided)."""
-    if not hand_keypoints:
-        return smplx_dict
-    cL = getattr(model, "np_left_hand_components", None)
-    cR = getattr(model, "np_right_hand_components", None)
-    if cL is None or cR is None:
-        return smplx_dict
-    out = dict(smplx_dict)
-    lc = hand_keypoints.get("left_curls") or {}
-    rc = hand_keypoints.get("right_curls") or {}
-    if lc:
-        out["left_hand_pose"] = curls_to_hand_pose(lc, cL[0])
-    if rc:
-        out["right_hand_pose"] = curls_to_hand_pose(rc, cR[0])
     return out
 
 

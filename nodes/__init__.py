@@ -1,15 +1,12 @@
-from .nlf_nodes import NLFSMPLXEstimator
-from .wholebody_nodes import WholeBodyHandDetector
+from .multihmr_nodes import MultiHMREstimator
 from .smplx_nodes import SMPLXEditor
 
 NODE_CLASSES = [
-    NLFSMPLXEstimator,
-    WholeBodyHandDetector,
+    MultiHMREstimator,
     SMPLXEditor,
 ]
 
 NODE_CLASS_MAPPINGS = {
-    "NLFSMPLXEstimator": NLFSMPLXEstimator,
-    "WholeBodyHandDetector": WholeBodyHandDetector,
+    "MultiHMREstimator": MultiHMREstimator,
     "SMPLXEditor": SMPLXEditor,
 }

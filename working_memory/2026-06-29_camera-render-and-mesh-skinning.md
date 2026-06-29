@@ -203,6 +203,34 @@ js/viewer_pose3d.html, keeping our joint editing:
   Rest Pose" -> "Reset Edits" (ours resets to loaded estimate, not T-pose).
 - Verified: module syntax OK (node --check w/ stubbed imports), 13 UI ids present.
 
+## Feature #10 — Replaced NLF+HandDetector with Multi-HMR (expressive whole-body, DONE)
+User: NLF(SMPL) + separate ViTPose hand-curl hack made hands "melt" + wanted ONE node
+with hands+expression. Research (sources/research_expressive_wholebody_smplx_2026-06-29.md)
+picked **Multi-HMR** (ECCV'24 Naver): one forward pass -> full SMPL-X (body+hands+
+expression+real betas+transl), NO mmcv, modern torch.
+- **Cloned:** /home/wswg3/github/multi-hmr (loaded by path, like VPoser). Patched
+  utils/__init__.py to make the render (pyrender) import optional (not installed).
+- **Weights:** ComfyUI/models/multiHMR/multiHMR_896_L.pt (1.29GB, Naver). + dummy
+  ComfyUI/models/smpl_mean_params.npz (correct shapes; buffers overwritten by ckpt).
+- **modules/multihmr/estimate.py:** lazy sys.path + import (after ComfyUI startup, to
+  avoid 'utils'/'model'/'blocks' sys.modules collisions); patches
+  blocks.smpl_layer.SMPLX_DIR + model.MEAN_PARAMS; torch.load(weights_only=False);
+  preprocess (resize/pad to img_size 896 + normalize_rgb); model(...) -> humans; pick
+  largest; rotvec[53,3] -> global_orient/body_pose/lhand/rhand/jaw; betas/expression/
+  transl; Rx180 frame fix (OpenCV cam Y-down -> Y-up).
+- **nodes/multihmr_nodes.py `MultiHMREstimator`** (display "SMPL-X Estimator"): IMAGE ->
+  SMPLX + preview; offloads multihmr to CPU after inference (GPU). det_thresh input.
+- **Removed:** NLFSMPLXEstimator, WholeBodyHandDetector, modules/{nlf,wholebody},
+  tests/test_wholebody_hands.py, smplx_nodes._apply_estimated_hands + wholebody import.
+- **Verified (CPU):** loads, betas real/nonzero, hands+expression nonzero, render shows
+  upright body with hands posed/clasped matching the photo (NO melt). 2 nodes register;
+  test_skin + test_edit_p4 pass.
+- **Runtime deps/notes:** first load fetches DINOv2 arch via torch.hub (needs internet
+  once, cached in ~/.cache/torch/hub). GPU was contended by user's OTHER processes
+  during testing (verified on CPU). Multi-HMR weights = Naver NON-COMMERCIAL license.
+  Old NLF torchscript + vitpose onnx now unused on disk (gitignored).
+- Pipeline now: image -> SMPL-X Estimator (Multi-HMR) -> SMPL-X Editor. 2 nodes total.
+
 ## Suggested graph wiring
 ClickPose ─┬─ POSE_KEYPOINTS ─────────────► SMPLXFit ─► SMPLXEditor
            └─ (image) ─► WholeBodyHandDetector ─ HAND_KEYPOINTS ─► SMPLXFit.hand_keypoints

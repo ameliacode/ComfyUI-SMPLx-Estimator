@@ -3,3 +3,8 @@ opencv-python
 scipy
 torch
 torchvision
+smplx
+# Multi-HMR estimator deps (model code cloned to ~/github/multi-hmr, loaded by path)
+einops
+roma
+pillow

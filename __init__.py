@@ -5,8 +5,7 @@ from .nodes import NODE_CLASS_MAPPINGS, NODE_CLASSES
 WEB_DIRECTORY = "./js"
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "NLFSMPLXEstimator": "SMPL-X Estimator",
-    "WholeBodyHandDetector": "Hand Detector",
+    "MultiHMREstimator": "SMPL-X Estimator",
     "SMPLXEditor": "SMPL-X Editor",
 }
 

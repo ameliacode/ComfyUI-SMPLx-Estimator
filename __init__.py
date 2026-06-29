@@ -7,6 +7,7 @@ WEB_DIRECTORY = "./js"
 NODE_DISPLAY_NAME_MAPPINGS = {
     "NLFSMPLXEstimator": "SMPL-X Estimator (NLF)",
     "MultiHMREstimator": "SMPL-X Estimator (Multi-HMR)",
+    "WiLoRHandEstimator": "Hand Estimator (WiLoR)",
     "SMPLXEditor": "SMPL-X Editor",
 }
 

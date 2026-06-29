@@ -243,6 +243,20 @@ modules/nlf restored from git (70ad75d~1); nodes/nlf_nodes.py rewritten clean (n
 hand_keypoints, no _apply_estimated_hands). NLF weights at
 ComfyUI/models/nlf/nlf_l_multi_0.3.2.torchscript (493MB).
 
+## Feature #12 — WiLoR dedicated hand estimator (DONE)
+SOTA separate hand model (WiLoR: in-the-wild YOLO+ViT, MANO, no detectron2/mmcv,
+CC-BY-NC-ND). Cloned ~/github/WiLoR (loaded by path; `wilor` pkg, no collision).
+Patched wilor/utils/__init__ optional pyrender; loaded init_renderer=False.
+MANO model copied from controlnet_aux mesh_graphormer -> WiLoR/mano_data/.
+Weights: WiLoR/pretrained_models/{detector.pt, wilor_final.ckpt 2.56GB} from HF.
+modules/wilor/estimate.py: YOLO detect -> ViTDetDataset -> pred_mano_params hand_pose
+(15,3,3 rotmat)->roma.rotmat_to_rotvec->45 aa; LEFT mirror (neg y,z) to SMPL-X.
+nodes/wilor_nodes.py WiLoRHandEstimator (display "Hand Estimator (WiLoR)") -> SMPLX
+(left/right_hand_pose) into NLF.hands_from. CPU fallback. 4 nodes now.
+VISUALLY VERIFY left-hand mirror in editor (offline check inconclusive); flip sign
+in estimate.py if inverted. NOTE: working_memory keeps getting deleted (gitignored
++ something clears it) — restore via `git checkout HEAD -- working_memory/...`.
+
 ## Suggested graph wiring
 ClickPose ─┬─ POSE_KEYPOINTS ─────────────► SMPLXFit ─► SMPLXEditor
            └─ (image) ─► WholeBodyHandDetector ─ HAND_KEYPOINTS ─► SMPLXFit.hand_keypoints

@@ -8,3 +8,8 @@ smplx
 einops
 roma
 pillow
+# WiLoR hand estimator deps (model code cloned to ~/github/WiLoR, loaded by path)
+ultralytics
+yacs
+timm
+pytorch-lightning

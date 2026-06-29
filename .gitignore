@@ -20,3 +20,7 @@ vendor/
 # Machine-local Claude settings + markers
 .claude/settings.local.json
 .codex
+
+.github/
+.claude/
+working_memory/

@@ -20,15 +20,13 @@ import numpy as np
 import torch
 
 from ..modules.smplx_fit.model import load_smplx, resolve_device, DEFAULT_SMPLX_PARENT
-from ..modules.smplx_fit.fitting import fit_smplx_3d, resolve_edit, resolve_hand_edit
+from ..modules.smplx_fit.fitting import resolve_edit, resolve_hand_edit
 from ..modules.smplx_fit.joint_maps import (
     body_limbs, editable_limbs, EDITABLE_JOINTS, NUM_BODY_JOINTS,
 )
 from ..modules.smplx_fit.render import render_maps
-from ..modules.smplx_fit.skin import body_skin_weights, editable_skin_weights
+from ..modules.smplx_fit.skin import editable_skin_weights
 from ..modules.wholebody.hands import curls_to_hand_pose
-from ..modules.motionagformer.model import MotionAGFormerModel
-from ..modules.motionagformer.inference import run_lifting
 
 
 def _img(arr: np.ndarray) -> torch.Tensor:
@@ -49,8 +47,6 @@ def _ground(smplx_dict: dict, verts: np.ndarray):
     vg[:, 1] -= min_y
     return out, vg
 
-_DEFAULT_MAF_CKPT = "custom_nodes/comfyui-mocap/checkpoints/motionagformer-l-h36m.pth.tr"
-_maf_cache: dict = {}
 
 # Hand grasp: the SMPL-X MANO hand PCA component 0 is the dominant open<->close
 # axis. With flat_hand_mean=True a zero hand_pose is flat/open; adding a positive
@@ -141,119 +137,6 @@ def _apply_estimated_hands(smplx_dict: dict, model, hand_keypoints) -> dict:
     if rc:
         out["right_hand_pose"] = curls_to_hand_pose(rc, cR[0])
     return out
-
-
-def _load_maf(checkpoint_path: str, device: str):
-    if not os.path.isfile(checkpoint_path):
-        hint = ""
-        if "vposer" in checkpoint_path.lower() or os.path.isdir(checkpoint_path):
-            hint = (" This looks like a stale VPoser/dir value from the old node — "
-                    "reset 'maf_checkpoint_path' (or delete and re-add SMPLXFit).")
-        raise FileNotFoundError(
-            f"maf_checkpoint_path is not a file: {checkpoint_path!r}. It must point to "
-            f"the MotionAGFormer checkpoint (default {_DEFAULT_MAF_CKPT!r})." + hint
-        )
-    key = (checkpoint_path, device)
-    if key not in _maf_cache:
-        m = MotionAGFormerModel()
-        m.load(checkpoint_path, device, 1)
-        _maf_cache[key] = m
-    return _maf_cache[key]
-
-
-def _render_smplx_preview(joints_3d: np.ndarray, size: int) -> torch.Tensor:
-    """Orthographic XY preview of the 22 SMPL-X body joints + bones."""
-    pts = joints_3d[:NUM_BODY_JOINTS, :2].astype(np.float32).copy()
-    pts[:, 1] = -pts[:, 1]                                   # image Y is down
-    mins, maxs = pts.min(0), pts.max(0)
-    span = np.maximum(maxs - mins, 1e-6)
-    scale = size * 0.76 / float(span.max())
-    pts = (pts - (mins + maxs) * 0.5) * scale + size * 0.5
-
-    canvas = np.zeros((size, size, 3), np.uint8)
-    for c, p in body_limbs():
-        cv2.line(canvas, tuple(np.round(pts[c]).astype(int)),
-                 tuple(np.round(pts[p]).astype(int)), (0, 170, 255), 3, cv2.LINE_AA)
-    for (x, y) in pts:
-        cv2.circle(canvas, (int(round(x)), int(round(y))), 5, (255, 255, 255), -1, cv2.LINE_AA)
-    rgb = cv2.cvtColor(canvas, cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0
-    return torch.from_numpy(rgb).unsqueeze(0)
-
-
-class SMPLXFit:
-    """
-    Fit SMPL-X to ClickPose COCO-17 keypoints via MotionAGFormer.
-
-    MotionAGFormer lifts the 2D keypoints to 3D joints (H36M-17), then SMPL-X is
-    fitted to those 3D joints (similarity-align + 3D IK, betas frozen). No camera
-    reprojection and no VPoser — the 3D joints constrain the pose directly.
-    """
-
-    @classmethod
-    def INPUT_TYPES(cls):
-        return {
-            "required": {
-                "pose_keypoints": ("POSE_KEYPOINTS",),
-                "smplx_model_path": ("STRING", {"default": DEFAULT_SMPLX_PARENT}),
-                "maf_checkpoint_path": ("STRING", {"default": _DEFAULT_MAF_CKPT}),
-                "gender": (["neutral", "male", "female"],),
-                "device": (["auto", "cuda", "cpu"],),
-                "iters": ("INT", {"default": 100, "min": 50, "max": 400,
-                                  "tooltip": "SMPL-X fit iterations. <~30 leaves the body "
-                                             "near its T-pose; 100 is a good default."}),
-                "seed": ("INT", {"default": 0, "min": 0, "max": 2**31 - 1}),
-            },
-            "optional": {
-                "hand_keypoints": ("HAND_KEYPOINTS", {
-                    "tooltip": "From WholeBodyHandDetector — sets the SMPL-X hand pose "
-                               "(per-finger curl) from the image. Omit for flat hands."}),
-            },
-        }
-
-    RETURN_TYPES = ("SMPLX", "IMAGE")
-    RETURN_NAMES = ("smplx", "preview")
-    OUTPUT_NODE = True
-    FUNCTION = "fit"
-    CATEGORY = "editpose"
-
-    @classmethod
-    def IS_CHANGED(cls, pose_keypoints, smplx_model_path, maf_checkpoint_path,
-                   gender, device, iters, seed, hand_keypoints=None):
-        h = hashlib.sha256()
-        h.update(np.asarray(pose_keypoints["keypoints"], np.float32).tobytes())
-        h.update(np.asarray(pose_keypoints["scores"], np.float32).tobytes())
-        h.update(repr((smplx_model_path, maf_checkpoint_path, gender, device, iters, seed)).encode())
-        if hand_keypoints:
-            h.update(repr((hand_keypoints.get("left_curls"),
-                           hand_keypoints.get("right_curls"))).encode())
-        return h.hexdigest()
-
-    def fit(self, pose_keypoints, smplx_model_path, maf_checkpoint_path,
-            gender, device, iters, seed, hand_keypoints=None):
-        dev = resolve_device(device)
-        maf = _load_maf(maf_checkpoint_path, dev)
-        pose3d = run_lifting(maf, pose_keypoints)          # H36M-17 3D joints (numpy)
-
-        model = load_smplx(smplx_model_path, gender, dev)
-        smplx_dict = fit_smplx_3d(
-            pose3d["joints_3d"], pose3d["joint_names"], model, dev,
-            iters=iters, seed=seed, gender=gender, model_path=smplx_model_path,
-        )
-        print(f"[smplx_fit] MotionAGFormer->SMPL-X fit: loss={smplx_dict['fit_loss']:.4f}")
-
-        smplx_dict = _apply_estimated_hands(smplx_dict, model, hand_keypoints)  # image hands
-
-        verts, faces, joints = _forward_mesh(smplx_dict, model, dev)
-        smplx_dict["joints_3d"] = joints                      # match the posed mesh
-        smplx_dict, verts = _ground(smplx_dict, verts)        # feet on the floor
-        pose, _, _, _ = render_maps(verts, faces, dev, size=512, ground=False)
-        preview = _img(pose)
-        payload = json.dumps({
-            "joints_3d": smplx_dict["joints_3d"][:NUM_BODY_JOINTS].tolist(),
-            "joint_names": smplx_dict["joint_names"],
-            "fit_loss": smplx_dict["fit_loss"],
-        })
-        return {"ui": {"smplx_json": [payload]}, "result": (smplx_dict, preview)}
 
 
 def _forward_mesh(smplx_dict, model, device):

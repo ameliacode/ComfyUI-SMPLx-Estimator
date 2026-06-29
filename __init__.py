@@ -5,13 +5,9 @@ from .nodes import NODE_CLASS_MAPPINGS, NODE_CLASSES
 WEB_DIRECTORY = "./js"
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "ClickPose": "ClickPose",
-    "MotionAGFormer": "MotionAGFormer",
-    "3D Pose Editor": "3D Pose Editor",
-    "SMPLXFit": "SMPL-X Fit",
-    "SMPLXEditor": "SMPL-X Editor",
-    "WholeBodyHandDetector": "Whole-Body Hand Detector",
     "NLFSMPLXEstimator": "NLF SMPL-X Estimator",
+    "WholeBodyHandDetector": "Whole-Body Hand Detector",
+    "SMPLXEditor": "SMPL-X Editor",
 }
 
 __all__ = [

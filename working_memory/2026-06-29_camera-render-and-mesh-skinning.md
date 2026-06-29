@@ -150,6 +150,24 @@ path does NOT use ClickPose's 2D edits. If they want both, NEXT would be a 2D
 reprojection-refine on the NLF init (needs a camera). Possible future: SMPL->SMPL-X
 betas transfer for real shape.
 
+## Feature #7 — Minimized to NLF-only (DONE)
+User: "sole nlf smplx" — committed a checkpoint (3afd6b0) then stripped the package.
+- **Kept (3 nodes):** NLFSMPLXEstimator, WholeBodyHandDetector, SMPLXEditor +
+  modules/{nlf,wholebody,smplx_fit} + js viewer + tests {skin,edit_p4,wholebody_hands}.
+- **Deleted:** nodes/editpose_nodes.py (ClickPose/MotionAGFormer/Pose3DEditor),
+  SMPLXFit class, modules/{clickpose,motionagformer}, modules/calculator.py,
+  vendor/, web/, tests/{test_fit_3d,test_joint_map}.py.
+- **Trimmed dead code:** fitting.py -> only resolve_edit/resolve_hand_edit (removed
+  fit_smplx_3d/_fit_3d_impl/_np1); joint_maps.py -> removed COCO/H36M name tables +
+  build_coco_to_smplx/build_h36m_to_smplx (kept body/editable joint helpers);
+  smplx_nodes.py -> removed _load_maf/_render_smplx_preview/MAF imports/SMPLXFit.
+- **.gitignore:** added checkpoints/, weight patterns, vendor/, settings.local.json,
+  .codex. (A linter also appended .github/ .claude/ . — left as-is per note.)
+- **Verified:** 3 nodes register, no import failure, JS valid, 3 tests pass.
+- checkpoints/*.pth/*.tr still on disk (gitignored, now unused — for the old path).
+- The ONLY pipeline now: image -> NLFSMPLXEstimator (+WholeBodyHandDetector) -> SMPLXEditor.
+  ClickPose/2D-edit path is gone (no longer "2D-first"); HITL is purely the 3D editor.
+
 ## Suggested graph wiring
 ClickPose ─┬─ POSE_KEYPOINTS ─────────────► SMPLXFit ─► SMPLXEditor
            └─ (image) ─► WholeBodyHandDetector ─ HAND_KEYPOINTS ─► SMPLXFit.hand_keypoints

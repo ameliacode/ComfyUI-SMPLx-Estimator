@@ -50,6 +50,12 @@ class NLFSMPLXEstimator:
                 "gender": (["neutral", "male", "female"],),
                 "device": (["auto", "cuda", "cpu"],),
             },
+            "optional": {
+                "hands_from": ("SMPLX", {
+                    "tooltip": "Optional SMPL-X (e.g. from the Multi-HMR estimator) to GRAFT "
+                               "hand pose + jaw + expression onto NLF's robust body. Hand pose "
+                               "is wrist-relative so it attaches cleanly (no melt). Omit = flat hands."}),
+            },
         }
 
     RETURN_TYPES = ("SMPLX", "IMAGE")
@@ -59,35 +65,47 @@ class NLFSMPLXEstimator:
     CATEGORY = "editpose"
 
     @classmethod
-    def IS_CHANGED(cls, image, nlf_model_path, smplx_model_path, gender, device):
+    def IS_CHANGED(cls, image, nlf_model_path, smplx_model_path, gender, device, hands_from=None):
         h = hashlib.sha256()
         h.update(np.asarray(image).tobytes())
         h.update(repr((nlf_model_path, smplx_model_path, gender, device)).encode())
+        if hands_from:
+            for k in ("left_hand_pose", "right_hand_pose", "jaw_pose", "expression"):
+                if k in hands_from:
+                    h.update(np.asarray(hands_from[k], np.float32).tobytes())
         return h.hexdigest()
 
-    def _run(self, run_dev, image_rgb01, nlf_model_path, smplx_model_path, gender):
+    def _run(self, run_dev, image_rgb01, nlf_model_path, smplx_model_path, gender, hands_from):
         model = load_nlf(nlf_model_path, run_dev)
         params = estimate_smplx_params(model, image_rgb01, run_dev)
         if run_dev != "cpu":
             torch.cuda.empty_cache()
-        print(f"[nlf] estimated SMPL-X body pose from "
-              f"{image_rgb01.shape[1]}x{image_rgb01.shape[0]} on {run_dev}")
         smplx_model = load_smplx(smplx_model_path, gender, run_dev)
         smplx_dict = _smplx_dict(params, gender, smplx_model_path)
+
+        # graft hands + jaw + expression from another SMPL-X (e.g. Multi-HMR).
+        # hand_pose is wrist-relative MANO, so it attaches to NLF's wrist cleanly.
+        if hands_from:
+            for k in ("left_hand_pose", "right_hand_pose", "jaw_pose", "expression"):
+                if k in hands_from:
+                    smplx_dict[k] = np.asarray(hands_from[k], np.float32).copy()
+        print(f"[nlf] estimated SMPL-X body from {image_rgb01.shape[1]}x{image_rgb01.shape[0]} "
+              f"on {run_dev}" + (" + grafted hands/expression" if hands_from else ""))
+
         verts, faces, joints = _forward_mesh(smplx_dict, smplx_model, run_dev)
         smplx_dict["joints_3d"] = joints
         smplx_dict, verts = _ground(smplx_dict, verts)
         pose, _, _, _ = render_maps(verts, faces, run_dev, size=512, ground=False)
         return {"ui": {}, "result": (smplx_dict, _img(pose))}
 
-    def estimate(self, image, nlf_model_path, smplx_model_path, gender, device):
+    def estimate(self, image, nlf_model_path, smplx_model_path, gender, device, hands_from=None):
         dev = resolve_device(device)
         rgb01 = image[0].cpu().numpy().astype(np.float32)        # (H,W,3) [0,1]
         try:
-            return self._run(dev, rgb01, nlf_model_path, smplx_model_path, gender)
+            return self._run(dev, rgb01, nlf_model_path, smplx_model_path, gender, hands_from)
         except torch.OutOfMemoryError:
             if dev == "cpu":
                 raise
             torch.cuda.empty_cache()
             print("[nlf] CUDA out of memory (GPU likely busy) — retrying on CPU (slower).")
-            return self._run("cpu", rgb01, nlf_model_path, smplx_model_path, gender)
+            return self._run("cpu", rgb01, nlf_model_path, smplx_model_path, gender, hands_from)

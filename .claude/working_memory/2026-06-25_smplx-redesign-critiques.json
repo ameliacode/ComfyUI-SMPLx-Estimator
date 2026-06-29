@@ -1,0 +1,300 @@
+[
+  {
+    "round": 1,
+    "critiques": [
+      {
+        "verdict": "approve",
+        "summary": "This is an unusually well-grounded plan. I verified the load-bearing claims directly against the code and runtime, and most hold: SMPLX loads from the on-disk SMPLX_NEUTRAL.npz file path, runs a differentiable forward() on CUDA (127 joints, gradients flow through body_pose), the COCO->SMPLX joint index map matches smplx.joint_names.JOINT_NAMES exactly, window.TransformControls is exported in the bundle, the POSE3D_CORRECTIONS/loadPose3D iframe channel exists in js/extension.js, and bvh.py/quat.py are numpy-only and self-contained. The two-stage approach (keep MotionAGFormer as a 3D initializer, then Adam IK through smplx.forward()) is genuinely simpler than the SMPLify-2D alternative and needs zero new model downloads or heavy deps, which is the right call. The plan correctly rejects Hina (absent, wrong skeleton) and correctly gates VPoser (human_body_prior is genuinely not importable). My concerns are not about the architecture but about under-specified seams: ComfyUI caching/IS_CHANGED on the new nodes, the metric-scale reconciliation between MotionAGFormer's root-relative normalized output and SMPL-X's meter-scale rest pose, a stale duplicate web/ directory that will silently mislead JS edits, and a few default values that will produce bad fits. Approve to proceed, but the scale-alignment and IS_CHANGED items must be designed before coding, not discovered at Step 6.",
+        "issues": [
+          {
+            "severity": "blocking",
+            "area": "Scale/coordinate reconciliation (modules/motionagformer/inference.py:122-138 -> fitting.py)",
+            "problem": "run_lifting returns joints that are (a) root-relative, (b) normalized by IMAGE WIDTH (x_norm = px/W*2-1, y_norm = py/W*2-H/W), and (c) Y-negated. SMPL-X forward() emits metric meters in its own frame. These are different spaces by an unknown global scale and origin. The plan lists this as 'risk' with a one-line 'Procrustes/scale align' mitigation, but this is the single most likely thing to make every fit globally wrong, and the mitigation is not designed. A naive MSE(smplx.joints, maf_joints) with mismatched scale will converge to a collapsed or exploded pose, not a 'well-conditioned convex-ish' loss as claimed.",
+            "suggestion": "Promote this from risk to a designed Step 2 sub-task: before IK, similarity-align (scale + rotation + translation, i.e. Umeyama/Procrustes) the 13 mapped H36M init joints onto the SMPL-X T-pose joints of the same 13 indices, OR fit only on bone-length-normalized direction vectors and recover transl/scale separately. Add a unit test asserting per-bone length ratio init-vs-SMPLX is within tolerance BEFORE the Adam loop runs. Without this the <1s/100-200-step convergence claim is unsupported."
+          },
+          {
+            "severity": "major",
+            "area": "ComfyUI caching / IS_CHANGED on SMPLXEditor and SMPLXFitter (nodes/editpose_nodes.py)",
+            "problem": "The plan specifies no IS_CHANGED for the three new nodes, yet the existing nodes rely heavily on it (ClickPose and Pose3DEditor both implement it). SMPLXEditor's contract is: corrections widget changes -> re-run a second Adam IK pass. If IS_CHANGED is not defined to hash (smplx params + corrections + size), ComfyUI will either cache away a correction (the exact bug the ClickPose comments at lines 273-295 describe fighting) or re-run IK every queue and produce a slightly different non-deterministic pose because Adam IK from a re-seeded init is not idempotent. The plan's 'enabled: BOOLEAN cache passthrough' input on SMPLXFitter mimics MotionAGFormer's instance-level _cached_pose_3d, but that pattern is fragile across the shared-model caching already documented in CLAUDE.md.",
+            "suggestion": "Specify IS_CHANGED for all three nodes explicitly (hash the SMPLX dict's params arrays + corrections + size), mirroring Pose3DEditor.IS_CHANGED at lines 471-479. Make the editor IK deterministic (fixed seed, fixed iteration count, no early-stop randomness) so re-execution is reproducible. Decide and document whether editor IK re-runs on every queue or only when corrections change."
+          },
+          {
+            "severity": "major",
+            "area": "Edit round-trip semantics: direct-write vs IK (editorApproach, Pose3DEditor._apply_corrections at nodes/editpose_nodes.py:427-441)",
+            "problem": "The plan reuses the existing POSE3D_CORRECTIONS {idx:[x,y,z]} channel but fundamentally changes its meaning. Today _apply_corrections does a DIRECT joint overwrite (joints[idx] = value) and the displayed pose always exactly matches the drag. Under the new IK-on-apply design, the user drags joint 20 to position P, but IK with betas frozen and no pose prior will generally NOT place joint 20 at P (it minimizes MSE across constraints under kinematic limits). The handle will visibly snap back / drift after apply. This is a UX regression that on-call/users will read as a bug, and it is inherent to mapping an over-determined sparse drag back to 21-DOF body_pose.",
+            "suggestion": "Decide the interaction contract explicitly: either (a) accept IK drift and visually show both the target ghost and the solved result, or (b) for single-joint drags, prefer an analytic per-limb solution (the plan mentions CCD quat.py ik_rot as 'later' - it may be needed in Phase 1 for acceptable UX). At minimum, document that edited joints are targets, not guarantees, and surface residual error to the user."
+          },
+          {
+            "severity": "major",
+            "area": "Stale duplicate web/ directory (web/viewer_pose3d.html, web/pose_editor.js)",
+            "problem": "There are TWO copies of the viewer: js/viewer_pose3d.html (live, WEB_DIRECTORY='./js' in __init__.py:5) and web/viewer_pose3d.html (byte-identical now, untracked, older mtime, plus an orphan web/pose_editor.js that has no js/ counterpart). The plan edits only js/, which is correct, but the stale web/ copy is a trap: a future edit or a hard-refresh confusion will have someone editing the dead file and wondering why nothing changes. The plan does not acknowledge this duplication at all.",
+            "suggestion": "Before starting Step 4, delete or git-ignore the stale web/ directory (it is not the served path) so there is exactly one viewer_pose3d.html. Note web/pose_editor.js has no js/ equivalent - confirm it is truly dead before removal. This is read-only observation; the orchestrator should action it."
+          },
+          {
+            "severity": "minor",
+            "area": "Default fit parameters (nodeApi SMPLXFitter: betas frozen=0, nose->head map, lr=0.05/150 iters)",
+            "problem": "Three defaults will degrade fit quality: (1) betas frozen at 0 means a generic body whose limb lengths will not match the subject, so IK must absorb the mismatch as pose distortion - acceptable for Phase-1 BVH but it compounds the scale issue above. (2) The COCO nose(0)->SMPLX head(15) target is anatomically poor: the nose is ~10-15cm forward of the head joint, so pinning head to nose tilts the neck forward every time. (3) lr=0.05 with plain Adam for 150 steps on a scale-mismatched target is a guess, not validated.",
+            "suggestion": "Drop the nose->head correspondence or down-weight it heavily (use it only for head yaw, not position). Consider allowing a global scale DOF even when betas are frozen. Treat lr/iterations as tunables validated by the Step 2 convergence test, not fixed defaults baked into the node UI."
+          },
+          {
+            "severity": "minor",
+            "area": "Orthographic preview ignores depth (nodes/editpose_nodes.py:134-145, reused for SMPLX previews)",
+            "problem": "The plan reuses _project_pose_3d_to_canvas, which projects X/Y only (orthographic, depth discarded for position) and just shades by Z. For a 22-joint SMPL-X body with real depth and self-occlusion (spine1/2/3, collars), an orthographic XY dump will be hard to read and gives the editor user no depth cue while dragging in the 2D preview panes. The interactive three.js viewer is fine; the static pose/depth/normal IMAGE outputs will look worse than for the sparse H36M skeleton.",
+            "suggestion": "Acceptable for Phase 1, but note the previews are not load-bearing for editing (the iframe is). Consider whether SMPLXFitter/SMPLXEditor even need to be OUTPUT_NODE-style image emitters, or whether that is ceremony copied from Pose3DEditor."
+          },
+          {
+            "severity": "minor",
+            "area": "BVH single-frame downstream compatibility (SMPLXToBVH, modules/smplx_fit/bvh_export.py)",
+            "problem": "Frames:1 BVH is flagged as a risk with 'optionally duplicate to Frames:2'. Many importers (Blender, UE) require at least 2 frames or a nonzero frame time to import an animation rather than erroring or showing nothing. The Phase-1 EXIT criterion (Step 6) is 'open the BVH in Blender/UE' - if a 1-frame clip fails to import there, the exit gate fails on a known, pre-identified issue.",
+            "suggestion": "Make Frames:2 (duplicate frame) the DEFAULT, not an optional mitigation, since the exit test is literally opening it in Blender/UE. Cheap insurance."
+          },
+          {
+            "severity": "minor",
+            "area": "License vendoring of bvh.py/quat.py (modules/smplx_fit/utils/)",
+            "problem": "The plan vendors copies of Sitcom-Crafter's visualization/utils/bvh.py and quat.py and notes 'origin license should be confirmed before commit'. I confirmed Sitcom-Crafter has a top-level LICENSE but the util files themselves carry no header; their actual provenance (these bvh/quat utils are commonly derived from the AnimationKit / Daniel Holden motion code) is unverified. Committing them into this repo without a confirmed compatible license is a real legal/redistribution gap, separate from the SMPL-X non-commercial weights note.",
+            "suggestion": "Before Step 0 commit, trace the true upstream of bvh.py/quat.py and confirm the license permits redistribution in this repo; if unclear, prefer a reimplementation of the small axis-angle->euler->BVH math rather than copying."
+          }
+        ],
+        "strengths": [
+          "Core technical feasibility verified at runtime: smplx.create loads the on-disk SMPLX_NEUTRAL.npz file directly, forward() runs on the L40S producing 127 joints, and gradients flow through body_pose - so the differentiable-IK approach genuinely works on the stated env with zero new downloads.",
+          "The COCO->SMPLX joint index map in the plan (head=15, shoulders 16/17, elbows 18/19, wrists 20/21, hips 1/2, knees 4/5, ankles 7/8) matches smplx.joint_names.JOINT_NAMES exactly - the mapping is correct, not hand-waved.",
+          "Reuses validated existing machinery: the COCO->H36M map in inference.py, the POSE3D_CORRECTIONS/loadPose3D iframe channel (extension.js ~483/503), and window.TransformControls already in the bundle (line 37228). Genuinely minimal new surface area.",
+          "Correctly rejects the resume-driven alternatives: no feed-forward image regressor (OSX/SMPLer-X) because they ignore HITL keypoints, and Hina because it is absent and speaks the wrong skeleton. Picks the simplest path that meets all 3 goals.",
+          "Honestly gates VPoser behind a flag - I confirmed human_body_prior is genuinely not importable, so defaulting use_vposer=False is correct and the plan does not pretend otherwise.",
+          "Risk register is unusually candid and mostly accurate (the Y-negation, the 13-reliable-joints limitation, the [:55] slice off-by-index hazard, the non-metric scale) - it flags the real landmines even where it under-designs the mitigations."
+        ]
+      },
+      {
+        "verdict": "revise",
+        "summary": "The plan's core technical thesis is sound and I verified its load-bearing physics claims against the live environment: smplx 0.1.28 loads SMPLX_NEUTRAL.npz on cuda, forward() returns (1,127,3) joints and is differentiable wrt body_pose/global_orient (grad confirmed nonzero), parents has 55 entries and the first-22 connectivity matches the plan's viewer limb table, the COCO/H36M->SMPL-X index map (head=15, shoulders=16/17, etc.) is correct, MotionAGFormer's run_lifting already returns H36M-17 joints_3d, and the smplx2bvh math plus its numpy-only bvh.py/quat.py are real, self-contained, and vendorable. The recommended path (MotionAGFormer init -> 3D-joint Adam IK through smplx.forward) needs zero new downloads and zero new heavy deps, and correctly rejects feed-forward regressors (they need an image crop, not COCO-17) and correctly gates VPoser behind an uninstalled human_body_prior. So feasibility of 2D->SMPL-X and BVH is genuinely confirmed. However, the plan materially MISSTATES the maturity of the editor round-trip, which is the weakest verified claim and the one most likely to cause schedule slippage. It repeatedly asserts the '3D viewer emits POSE3D_CORRECTIONS and the write-back channel already exists and works' — this is false. The 3D viewer (js/viewer_pose3d.html) is read-only: it only ever posts VIEWER_READY (line 160) and contains no TransformControls usage, no per-joint handles, no raycasting, and no corrections emit. The POSE3D_CORRECTIONS messages that extension.js handles (lines 503-512) originate exclusively from a separate 2D keypoint canvas modal (lines 360-390), never from the 3D viewer. So 'Editor = extend the existing viewer with zero new JS deps' is real (TransformControls IS bundled at line 31363), but Step 4 is a substantial new interactive-3D-editing feature, not the small wiring task the prose implies. Two correctness issues also need fixing before implementation.",
+        "issues": [
+          {
+            "severity": "major",
+            "area": "editorApproach / nodeApi (SMPLXEditor) / dataFlow",
+            "problem": "The plan asserts (in editorApproach, dataFlow, and filesToAddOrChange) that the 'POSE3D_CORRECTIONS -> corrections-widget channel already exists and works' for the 3D viewer and that edits are 'the existing channel'. Verified false: js/viewer_pose3d.html is a read-only display that only posts VIEWER_READY (line 160). It has NO TransformControls instantiation, NO draggable joint handles, NO raycaster, and NEVER posts POSE3D_CORRECTIONS. The only POSE3D_CORRECTIONS producer in the codebase is the separate 2D keypoint modal (extension.js lines 360-390). Building drag-to-edit in the 3D viewer is net-new interactive code (handle spheres, raycast pick, TransformControls attach/detach, dragging-changed OrbitControls disable, mouseup world-position collection, emit). The plan estimates '~80-120 LOC' which is plausible but it is mislabeled as wiring an existing channel.",
+            "suggestion": "Reframe Step 4 as a new feature, not a binding task. Budget it accordingly and de-risk it first (spike a single draggable sphere that emits POSE3D_CORRECTIONS before building the full 22-joint editor). Note the existing container-level stopPropagation on pointerdown/pointermove (extension.js 494-495) and wheel preventDefault (492-493) will swallow gizmo pointer events inside the iframe-hosting container; the gizmo lives inside the iframe so iframe-internal pointer events are fine, but verify the iframe receives focus/pointer events and that OrbitControls vs TransformControls 'dragging-changed' is wired."
+          },
+          {
+            "severity": "major",
+            "area": "editorApproach correctness — viewer normalizePose breaks the edit round-trip",
+            "problem": "viewer_pose3d.html normalizePose() (lines 94-100) re-centers to the bounding-box center and rescales every incoming pose by 1.8/max(extent) BEFORE display. The plan's IK-on-edit design assumes the viewer emits WORLD-space joint targets {idx:[x,y,z]} that SMPLXEditor feeds directly as smplx.forward() joint targets. But the coordinates the user sees/drags are in this arbitrary normalized display frame, not SMPL-X metric world space. Emitting raw display coords as IK targets will fit the body to the wrong scale/origin, or require inverting the per-load normalization. This is the same class of bug the plan only half-acknowledges in risk #2 (MotionAGFormer scale reconciliation).",
+            "suggestion": "Decide one canonical edit frame. Either (a) remove/bypass normalizePose for the SMPLX editor and display true SMPL-X metric joints so emitted targets are already in model space, or (b) have the viewer store and apply the inverse transform (center+scale) to dragged positions before emitting, so corrections come back in SMPL-X world coords. Add a unit/integration assertion that a no-op drag re-solves to (approximately) the input params."
+          },
+          {
+            "severity": "major",
+            "area": "risks #2 / fitting.py — scale & coordinate reconciliation is underspecified for a load-bearing step",
+            "problem": "MotionAGFormer output is normalized/root-relative (inference.py normalize_2d divides BOTH axes by image WIDTH, lift returns normalized-space coords, and run_lifting negates Y). SMPL-X joints are in meters with a real pelvis origin. The plan lists Procrustes/scale-align as a 'mitigation' but treats it as a side note; in reality every fit's global correctness depends on it. Without a correct similarity transform (scale + rotation + translation) from H36M-normalized space to SMPL-X rest-pose metric space, the Adam IK either converges to a globally wrong pose or fights the betas-frozen rest lengths.",
+            "suggestion": "Promote scale/frame alignment to a first-class, tested sub-step of Step 2: compute a similarity transform (e.g. umeyama/Procrustes on the 13 shared joints between the H36M init and the SMPL-X rest-pose joints) and apply it to targets before IK, OR optimize a global scale scalar jointly. Add a test asserting fitted limb lengths match SMPL-X rest limb lengths within tolerance and the 13 mapped joints land within target tolerance (the plan's Step 2 already wants this — make scale part of its acceptance)."
+          },
+          {
+            "severity": "minor",
+            "area": "openQuestions / metric scale ambiguity affects BVH usability",
+            "problem": "Because betas are frozen at 0 and there are no camera intrinsics, the output is only self-consistent scale, not true meters. The plan flags this as an open question but BVH offsets/translation are written directly from joint positions (smplx2bvh lines 121-133), so the exported BVH will carry whatever scale the fit settled on. Downstream tools (Blender/UE) may import at an unexpected scale.",
+            "suggestion": "For Phase 1, fix scale to SMPL-X rest-pose (betas=0) metric scale by deriving offsets from the rest-pose forward() as smplx2bvh already does (offsets = rest_pose - rest_pose[parents]); only translation/rotation come from the fit. This keeps bone lengths in real meters regardless of IK and sidesteps the metric-scale question for export."
+          },
+          {
+            "severity": "minor",
+            "area": "phasedSteps Step 0 / bvh_export.py — joint-array assembly & rest-pose dependency",
+            "problem": "smplx2bvh builds rotations from a (N,55,3) axis-angle array assembled as [body 21*3 from poses[3:69]] + [9 zeros for jaw/eyes] + [hand poses]. The plan's SMPLX dict stores global_orient(3)+body_pose(63)=22*3 directly, plus separate zeroed jaw/eye/hand fields, so the assembly order differs from the reference and must be reconstructed carefully to match the 55-name BVH order (risk #4 notes the off-by-index danger correctly). Also note offsets in smplx2bvh come from a rest forward() with betas, so the export needs the same model_path/gender/betas to recompute offsets — the SMPLX dict carries these, good.",
+            "suggestion": "In Step 0's unit test, assert the assembled (55,3) axis-angle ordering matches names[:55] exactly (pelvis, l_hip, r_hip, spine1, ... per smplx2bvh lines 41-97), and that body indices 0-21 map to global_orient+body_pose in SMPL-X kinematic order. Keep this assertion as a regression guard."
+          },
+          {
+            "severity": "minor",
+            "area": "risks / licensing — SMPL-X redistribution and vendored utils",
+            "problem": "Risk note correctly flags SMPL-X (MPI non-commercial) must not be redistributed and that bvh.py/quat.py license should be confirmed. The plan vendors bvh.py/quat.py into the repo; their license header was not present in the files inspected (both start straight into code with no SPDX/license banner).",
+            "suggestion": "Before committing vendored bvh.py/quat.py, confirm their upstream license (they appear to derive from the Motion-utils/'quaternion' MIT-style libs but verify) and add an attribution/license header. Keep SMPL-X .npz out of the repo (load from the existing absolute path), as the plan already does."
+          }
+        ],
+        "strengths": [
+          "Method choice is correct and well-justified: feed-forward SMPL-X regressors (OSX/SMPLer-X/PyMAF-X/NLF) genuinely cannot consume COCO-17 keypoints as primary input (they need an image crop), so they would bypass ClickPose's HITL corrections — the plan rightly rejects them and picks differentiable IK through smplx.forward(). I verified forward() is differentiable wrt body_pose/global_orient with nonzero gradients.",
+          "Zero-new-download / zero-new-heavy-dep claim is verified true for the core path: smplx and trimesh are installed, SMPLX_NEUTRAL/MALE/FEMALE .npz are all on disk, MotionAGFormer checkpoint is already wired, and pyrender/chumpy are correctly identified as NOT needed for fitting.",
+          "VPoser is correctly handled: the V02_05.ckpt symlink resolves to a real 88MB vposer_v2_0.ckpt, but human_body_prior is confirmed NOT importable, so gating use_vposer=False by default with a guarded import is the right call (risk #5 names this precisely).",
+          "The BVH export path is real and grounded: smplx2bvh.py exists with clean numpy-only math, and its bvh.py/quat.py dependencies import only re+numpy (no HHInter.global_path coupling in the leaf utils), so vendoring them as the plan proposes is feasible. Frames:1 single-frame export is achievable.",
+          "Joint mapping is verified correct: SMPL-X body joint order gives head=15, l/r_shoulder=16/17, and parents[:22] matches the plan's stated connectivity, so the COCO/H36M->SMPL-X index map and viewer limb table are accurate.",
+          "Good architectural fit with existing repo conventions: SMPLX-as-dict-of-numpy mirrors POSE_KEYPOINTS/POSE_3D, the OUTPUT_NODE preview pattern follows Pose3DEditor, and the model-cache-per-(path,gender,device) mirrors clickpose/motionagformer — all reduce integration risk.",
+          "Risk register is unusually honest and mostly accurate (off-by-index BVH corruption, 13-reliable-joints sparsity, VPoser trap, single-frame clip), which made verification efficient."
+        ]
+      },
+      {
+        "verdict": "approve",
+        "summary": "The plan satisfies all three explicit requirements. (1) SMPL-X output: the new SMPLXFitter emits a parametric SMPLX dict (global_orient/body_pose/betas/transl + cached joints) replacing MotionAGFormer's H36M POSE_3D — SATISFIED. I verified smplx.create() loads SMPLX_NEUTRAL.npz on the venv (body_pose=21 joints=63 dims, 55 parents). (2) POSE_KEYPOINTS as input: SMPLXFitter takes pose_keypoints: POSE_KEYPOINTS as its primary input and feeds it through the existing coco_to_h36m + run_lifting path (confirmed in modules/motionagformer/inference.py), so HITL-corrected COCO-17 flows through unchanged — SATISFIED. The plan also correctly justifies rejecting feed-forward regressors (OSX/SMPLer-X) precisely because they would ignore POSE_KEYPOINTS, which directly protects Goal 2. (3) Editable 3D joints: SMPLXEditor sends body joints to the iframe viewer, user drags via TransformControls (confirmed bundled at window.TransformControls, js/three/viewer-bundle-three.js:37228), and a second Adam IK pass through differentiable smplx.forward() maps {idx:[x,y,z]} corrections back to SMPL-X params — SATISFIED. The POSE3D_CORRECTIONS write-back channel is confirmed present in js/extension.js:503-512. No requirement is unmet, so there are no blocking issues. Caveats below are non-blocking accuracy/risk notes. All environment claims I checked held up: smplx importable, human_body_prior NOT importable (VPoser correctly gated), SMPL-X NEUTRAL.npz present, bvh.py/quat.py/smplx2bvh.py present in Sitcom-Crafter.",
+        "strengths": [
+          "Goal 2 is structurally protected: the plan rejects image-crop feed-forward regressors specifically because they would bypass ClickPose's HITL-corrected POSE_KEYPOINTS, and instead routes COCO-17 through the already-validated coco_to_h36m + run_lifting path (verified in modules/motionagformer/inference.py).",
+          "Goal 3's edit-to-param round-trip is well-grounded: TransformControls is genuinely bundled (window.TransformControls at js/three/viewer-bundle-three.js:37228) and the POSE3D_CORRECTIONS->corrections-widget channel already exists in js/extension.js:503-512.",
+          "Zero new model downloads and zero new heavy deps for the core path: smplx import and SMPLX_NEUTRAL.npz load both verified on the actual ComfyUI venv; VPoser is correctly gated behind a default-False flag because human_body_prior is confirmed NOT importable.",
+          "Reusing MotionAGFormer as a 3D initializer gives a well-conditioned 3D-MSE IK target that avoids camera-intrinsics/focal-length guesswork, the simplest path satisfying all three goals on the available hardware."
+        ],
+        "issues": [
+          {
+            "severity": "minor",
+            "area": "dataType schema accuracy (Goal 1)",
+            "problem": "The dataType schema declares joints_3d: (55,3), but smplx.forward().joints actually returns 127 joints (verified on the venv: torch.Size([1,127,3])). The risks section acknowledges 127 vs 55 slicing, but the schema text itself states (55,3) without noting the slice.",
+            "suggestion": "State explicitly in the dataType that joints_3d is forward().joints[:, :55, :], and make the asserted joint_names alignment unit test (risk #4) a hard Step-1 gate."
+          },
+          {
+            "severity": "minor",
+            "area": "Goal 3 editor - outbound channel not yet existing",
+            "problem": "The plan states the iframe round-trip 'already works,' but the current viewer_pose3d.html only RECEIVES loadPose3D and renders (no drag handles, no POSE3D_CORRECTIONS emit). Only the inbound direction and the parent-side handler exist today; the outbound emit is net-new JS (correctly scoped in Step 4, but 'already works' overstates current state).",
+            "suggestion": "Reword to: inbound loadPose3D + parent-side corrections handler exist; viewer-side drag/emit is new work. Already budgeted (~80-120 LOC in Step 4), so this is an accuracy note, not a scope gap."
+          },
+          {
+            "severity": "minor",
+            "area": "Goal 3 robustness - IK with frozen betas, no prior",
+            "problem": "Edits map back via IK with betas frozen and (by default) no pose prior, so an anatomically implausible drag can converge to a bad pose. Does not violate 'editable + reflected back' but affects edit quality.",
+            "suggestion": "Keep the planned mitigations (small per-step edits, joint-angle clamps, optional VPoser) and additionally render the IK-converged joints back in the viewer after re-solve so the user sees the actual reflected result, not just their target drag."
+          },
+          {
+            "severity": "minor",
+            "area": "scale reconciliation (end-to-end correctness)",
+            "problem": "MotionAGFormer outputs root-relative normalized 3D with Y negated (confirmed in inference.py: joints_3d[:,1] = -joints_3d[:,1]); SMPL-X is metric. Without scale/Procrustes alignment to SMPL-X rest-pose limb lengths the global fit and transl will be off, degrading the SMPL-X output and BVH.",
+            "suggestion": "Make the Procrustes/scale-align step (risk #2) a mandatory pre-IK step in Step 2/3, not optional, and add a convergence-tolerance assertion to the Step-2 unit test."
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "round": 2,
+    "critiques": [
+      {
+        "verdict": "revise",
+        "summary": "This is a strong, unusually well-grounded plan: I verified its load-bearing factual claims against the live environment and they hold — smplx.forward().joints is (1,127,3), model.parents is (55,) with parents[:22] = [-1,0,0,0,1,2,3,4,5,6,7,8,9,9,9,12,13,14,16,17,18,19], JOINT_NAMES has 144 entries (so the [:55] slice and Step-1 name-gate are genuinely necessary, not paranoia), the body forward pass is differentiable wrt body_pose/global_orient, window.TransformControls + OrbitControls + Raycaster are bundled in js/three/viewer-bundle-three.js, the viewer is read-only, smplx/trimesh are installed and human_body_prior is not, the web/ viewer is byte-identical to js/ and pose_editor.js is unreferenced, and the Sitcom-Crafter bvh.py/quat.py are numpy-only with no license header while smplx2bvh.py imports HHInter.global_path. The method choice (MotionAGFormer init -> Umeyama align -> differentiable IK, betas frozen) is the right complexity level given the constraints; I confirmed at model.py:222 that MotionAGFormer output is in normalized-not-metric space, which justifies the Umeyama step the prior draft was missing. However, the plan ships a real latent correspondence bug (it specifies SMPL-X target indices but never the NON-STANDARD MotionAGFormer H36M source indices, where 11=right_shoulder/14=left_shoulder/13=right_hand/16=left_hand), the SMPLXEditor IK round-trip is a large net-new behavior change versus the existing direct-write editor whose value over direct-write is unproven, and several scope items (22-joint IK observability, preview-output necessity, IS_CHANGED double-execution) need tightening before build. Revise to nail the joint map and de-scope the editor, then proceed.",
+        "issues": [
+          {
+            "severity": "blocking",
+            "area": "Joint correspondence map (modules/smplx_fit/joint_maps.py, dataFlow)",
+            "problem": "The plan lists only SMPL-X TARGET indices for the IK constraints (Lhip->1, Rshoulder->17, Lwrist->20, etc.) but never the H36M SOURCE indices. The MotionAGFormer H36M order is NON-STANDARD and self-documented at inference.py:9-15 / 32-39 as: 1=left_hip, 4=right_hip, 2=left_knee, 5=right_knee, 3=left_foot, 6=right_foot, 11=right_shoulder, 14=left_shoulder, 12=right_elbow, 15=left_elbow, 13=right_hand, 16=left_hand, 0=sacrum. This is NOT the canonical H36M order most references assume (where 11/12/13 are typically the left arm). Any map written from memory of 'standard H36M' will silently swap left/right arms, and the IK will converge confidently to a mirrored pose. The Umeyama alignment will NOT catch this — a left/right arm swap is a near-symmetric configuration that aligns with low residual.",
+            "suggestion": "Make joint_maps.py source the H36M indices verbatim from modules/motionagformer/inference.py H36M_JOINT_NAMES (import it, don't retype), and add a Step-1 unit test that asserts the source-name -> SMPL-X-name pairing by NAME string (e.g. H36M 'right_hand' -> SMPLX 'right_wrist'=21), not by index. Add an explicit asymmetric-pose fixture (e.g. one arm raised) to the Step-2 fit test so a L/R swap fails the per-joint tolerance gate."
+          },
+          {
+            "severity": "major",
+            "area": "SMPLXEditor IK round-trip vs existing direct-write editor (nodes/editpose_nodes.py:428-441)",
+            "problem": "The existing Pose3DEditor._apply_corrections (line 440) does a trivial direct joint overwrite. The plan replaces this with a second deterministic Adam IK pass that re-solves SMPL-X params from drag targets, then re-displays the CONVERGED (not dragged) joints. This is the single largest net-new behavior in the plan, and its value over direct-write is asserted, not demonstrated. With betas frozen, no pose prior (VPoser off by default), and only the dragged joint(s) constrained while the other 21 are free, the IK is under-determined: dragging one wrist can swing the whole arm/torso to an unintended-but-lower-loss configuration, and the user's other carefully-posed joints can drift. 'Re-display the converged result' surfaces the drift but does not prevent it — it can feel like the editor 'fights' the user.",
+            "suggestion": "For Phase-1 BVH, question whether per-joint editing must re-solve to params at all. Cheaper path that still meets Goal 3: let the user drag the 22 body joints as direct positions (like the existing editor), and run a SINGLE final IK-to-params only at the SMPLXToBVH boundary (BVH needs rotations, so one fit there is unavoidable anyway). This removes the per-edit re-solve, the 'converged != dragged' UX problem, and the second Adam loop entirely. If interactive re-solve is kept, anchor all non-dragged joints with a soft regularizer toward their pre-drag positions so edits stay local, and prove it with a 'drag one wrist, assert other 21 joints move < epsilon' test."
+          },
+          {
+            "severity": "major",
+            "area": "SMPLXFitter IK observability / convergence (modules/smplx_fit/fitting.py)",
+            "problem": "The plan hard-codes iterations=200, lr=0.05 as node defaults 'validated by Step-2 test' but provides no per-run convergence signal. With 13 position constraints over global_orient(3)+body_pose(63)+transl(3)+optional scale, the system is under-constrained (spine1/2/3, neck, collars, head have zero 2D evidence per the plan's own note) and a fixed 200-step budget may not converge on hard poses, producing a plausible-looking but wrong BVH with no error surfaced. At 3am the on-call engineer gets a bad export and no signal whether the fit failed.",
+            "suggestion": "Return final per-joint residual (mean + max over the 13 constrained joints) in the SMPLX dict and log it; expose a residual threshold that, if exceeded, sets a visible warning on the node (or a status string output). Keep iterations/lr in the UI but add early-stop on residual plateau (deterministic: fixed patience, no randomness) so easy poses are fast and hard poses get the full budget."
+          },
+          {
+            "severity": "major",
+            "area": "BVH euler order / rotation correctness (modules/smplx_fit/bvh_export.py)",
+            "problem": "The plan says 'axis-angle -> quat -> zyx euler' and 'rest-pose offsets = rest_pose - rest_pose[parents]'. Two unverified correctness hazards: (1) BVH joint-local rotations are NOT the same as SMPL-X joint axis-angle unless the rest-pose bone offsets and the rotation composition are expressed in a consistent local frame — SMPL-X poses are relative to the parent in a specific convention, and naively writing global_orient+body_pose axis-angle as per-bone BVH euler will produce a skewed skeleton unless offsets and rotations share the same frame. (2) The euler order ('zyx') and degrees/radians convention must match the quat.to_euler util (smplx2bvh.py:134 uses np.degrees(quat.to_euler(rots, order=order)) — order is a variable there, not hard-coded zyx). The plan's Step-0 test only checks joint COUNT and ORDERING, not geometric correctness.",
+            "suggestion": "Before trusting the in-repo writer, run the existing Sitcom-Crafter smplx2bvh.py on a zero-pose and a known-pose SMPL-X param set, import the result in Blender, and use it as the geometric ground-truth fixture. The Step-0 test must compare the in-repo writer's output joint world-positions (reconstructed from the BVH) against smplx.forward().joints[:, :22] within tolerance — a pure ordering assertion will pass on a geometrically wrong skeleton."
+          },
+          {
+            "severity": "minor",
+            "area": "Static IMAGE preview outputs (SMPLXFitter/SMPLXEditor pose/depth/normal)",
+            "problem": "All three nodes carry pose/depth/normal IMAGE outputs reusing _project_pose_3d_to_canvas (orthographic XY). The plan's own openQuestion admits this 'reads worse for a dense 22-joint body' and asks if they're needed. Carrying them forces OUTPUT_NODE ceremony and the ui-payload double-execution pattern (the same machinery the ClickPose caching comment at editpose_nodes.py:273-295 had to fight) onto every node for marginal value when the interactive iframe is the real preview.",
+            "suggestion": "Drop the static pose/depth/normal outputs from SMPLXFitter and SMPLXEditor; keep only the interactive viewer. This also shrinks _render_pose_3d_pack reuse surface and removes a class of IS_CHANGED double-execution bugs. If a debug image is wanted, gate a single combined preview behind a flag."
+          },
+          {
+            "severity": "minor",
+            "area": "IS_CHANGED determinism vs upstream re-execution (all three nodes)",
+            "problem": "The plan correctly mandates deterministic IS_CHANGED + fixed-seed Adam. But determinism of the IK output across hardware/torch builds is not guaranteed: Adam on CUDA with the same seed can still vary across cuDNN versions/non-deterministic kernels, which would make IS_CHANGED-based caching produce different cached results than a re-run. For a single-pose fit this is cosmetic, but the plan elevates 'reproducible IS_CHANGED' to a first-class designed item.",
+            "suggestion": "Either (a) set torch.use_deterministic_algorithms(True) within the fit context and document the perf cost, or (b) downgrade the determinism claim to 'cache key is stable; numeric output is approximately reproducible' so reviewers don't expect bit-exactness. Don't over-promise determinism the CUDA path can't honor."
+          },
+          {
+            "severity": "minor",
+            "area": "License gate sequencing (modules/smplx_fit/utils/bvh.py, quat.py)",
+            "problem": "Verified: the Sitcom-Crafter bvh.py/quat.py are numpy-only with NO license header, and the parent smplx2bvh.py couples to HHInter.global_path. The plan correctly flags this but sequences the license trace as a 'BEFORE COMMIT' note inside Step 0, which is also where the writer is built and tested — risking sunk cost if the license turns out incompatible.",
+            "suggestion": "Resolve the license question as a Step-0 PRECONDITION before writing any code that copies those files. Given the math is small (axis-angle->quat->euler->BVH text), prefer a clean-room reimplement over vendoring unlicensed code; it removes the legal gate entirely and is a few dozen lines."
+          },
+          {
+            "severity": "minor",
+            "area": "Untrusted-content / scope hygiene (web/ deletion, Step 3.5)",
+            "problem": "No instruction-shaped or manipulative text was found in the source under review — the codebase comments are legitimate engineering notes (e.g. the genuine caching-bug explanation at editpose_nodes.py:273-295). The only hygiene item is the confirmed stale duplicate: web/viewer_pose3d.html is byte-identical to js/ and web/pose_editor.js is unreferenced anywhere in js/nodes/__init__.py/pyproject.toml. Editing the wrong copy is a real time-sink trap.",
+            "suggestion": "Keep Step 3.5 but make the deletion explicit and verified (it is: WEB_DIRECTORY='./js'). Note this is a read-only finding for the orchestrator to action; no manipulation risk was detected in the reviewed files."
+          }
+        ],
+        "strengths": [
+          "Factually grounded to an unusual degree: I independently verified joints (1,127,3), parents (55,) with the exact parents[:22] vector, JOINT_NAMES length 144 (making the [:55] slice and name-gate genuinely load-bearing), body_pose differentiability, bundled TransformControls/OrbitControls/Raycaster, installed smplx/trimesh, missing human_body_prior, the byte-identical web/ duplicate, and the unlicensed numpy-only bvh.py/quat.py — every spot-check matched the plan.",
+          "Correctly diagnosed and fixed the prior draft's blocking error: MotionAGFormer output is normalized space, not metric (confirmed at model.py:222 'in the same normalized space'), so the mandated Umeyama similarity transform onto SMPL-X rest-pose joints is the right fix, not over-engineering.",
+          "Method choice is appropriately simple for the constraints: it reuses the working MotionAGFormer lift as an initializer, keeps POSE_KEYPOINTS as the stage input (Goal 2), freezes betas, and avoids camera intrinsics/VPoser — and correctly rejects feed-forward regressors (OSX/SMPLer-X) because they need image crops and would ignore HITL corrections.",
+          "Good risk hygiene on real traps: the nose->head down-weighting, the joints[:55] off-by-index BVH-corruption guard, the VPoser ckpt-exists-but-import-fails trap, and the single-sphere editor spike before building 22 handles are all concrete and correct.",
+          "Phasing is testable with hard gates (name-alignment assertion, pre-IK bone-length tolerance, no-op-drag frame contract) rather than vibes."
+        ]
+      },
+      {
+        "verdict": "approve",
+        "summary": "The plan is technically sound and unusually well-grounded. I verified every load-bearing claim against the live environment, and the core method (MotionAGFormer 3D init -> Umeyama similarity-align onto SMPL-X rest-pose joints -> deterministic Adam IK through differentiable smplx.forward, betas frozen -> SMPLX dict -> BVH) is real and tractable on the available models/hardware with zero new downloads and zero new heavy deps. Confirmed facts: (1) smplx.create on /home/wswg3/github/Sitcom-Crafter/weights/smplx/SMPLX_NEUTRAL.npz loads; forward().joints is (1,127,3); gradients flow to global_orient/body_pose/transl (IK is real, sub-second on L40S). (2) The COCO-17/H36M -> SMPLX correspondence table is anatomically correct against smplx.joint_names.JOINT_NAMES (the one apparent ankle/foot 'mismatch' is just naming: H36M 'left_foot' is COCO left_ankle, correctly mapped to SMPLX left_ankle(7)). (3) body_pose is 63-dim, JOINT_NAMES[:55] and model.parents[:55] form a valid self-contained kinematic tree (max parent idx 53), so the [:55] slice and parents-based offsets are valid. (4) The BVH path is not hand-wavy: /home/wswg3/github/Sitcom-Crafter/HSInter/visualization/smplx2bvh.py does EXACTLY what the plan describes - offsets=rest_pose-rest_pose[parents], axis-angle->quat->zyx euler, [:55] slice, with global_orient+body_pose then 9 zeros (jaw/eyes) then hands = 55 joints; utils/bvh.py and utils/quat.py are pure-numpy (the global_path import lives only in smplx2bvh.py, not the utils). (5) window.TransformControls AND window.OrbitControls are both genuinely bundled in js/three/viewer-bundle-three.js. (6) The viewer (js/viewer_pose3d.html) is confirmed read-only (only VIEWER_READY out, loadPose3D in, normalizePose rescales by 1.8/maxextent at lines 94-100, no raycaster/handles), so the plan's 'NET-NEW interactive code' framing and 'bypass normalizePose for metric coords' contract are correct. (7) extension.js already has the POSE3D_CORRECTIONS->corrections-widget channel (lines 503-512) and Pose3DEditor.IS_CHANGED/_apply_corrections patterns match what the plan extends. Missing deps (pyrender, chumpy) are correctly NOT on the core path; human_body_prior is correctly gated behind use_vposer=False. The plan already self-identified and resolved the one genuine blocking risk (mismatched-space MSE) via the mandatory Umeyama transform with a pre-IK tolerance gate. No false or hand-wavy load-bearing claims found. The issues below are refinements, not blockers.",
+        "issues": [
+          {
+            "severity": "major",
+            "area": "IK observability / depth ambiguity",
+            "problem": "The whole quality of the SMPL-X fit rests on MotionAGFormer's single-image 3D init being metrically/depth-plausible after Umeyama. MotionAGFormer outputs width-normalized, root-relative, Y-negated coords (inference.py:135-138) with inherent monocular depth ambiguity. The plan asserts the 3D-space MSE is 'well-conditioned ONCE similarity-aligned' and converges in 150-250 steps, but provides no empirical loss/residual threshold to distinguish a good fit from a confidently-wrong one (e.g. front/back limb flips). The Step-2 test only asserts the 13 mapped joints land within tolerance of the (possibly wrong-depth) targets, which a degenerate solution can also satisfy.",
+            "suggestion": "In Step 2, add an absolute acceptance gate beyond per-joint residual: assert final per-joint MSE below a meters threshold AND sanity-check limb-length symmetry / no knee/elbow hyperextension on 2-3 sample poses. Consider keeping use_2d_reproj available not just for 'poor-depth cases' but as a cheap regularizer, since it is the only term tying the solution back to the actual HITL-corrected pixels."
+          },
+          {
+            "severity": "minor",
+            "area": "Editor IK under-constraint",
+            "problem": "Editing only 22 body-joint position targets with betas frozen and (optionally) global_scale free is under-determined for global_orient+body_pose+transl in the no-prior case: many param sets reproduce the same 22 joint positions (e.g. root yaw vs. limb rotations, bone-roll DOFs invisible to position-only targets). The plan acknowledges 'won't land exactly' but frames it only as over-determination; the under-determined roll/redundancy direction can cause visible pose drift on re-solve even for a no-op drag.",
+            "suggestion": "Add a small regularizer to the editor IK toward the incoming params (L2 on body_pose/global_orient deltas), not just toward targets. This makes the no-op-drag frame-contract test robust and keeps edits local. Document that bone-roll is unobservable from joint positions."
+          },
+          {
+            "severity": "minor",
+            "area": "Camera scale in viewer",
+            "problem": "Bypassing normalizePose to show true ~1.7m metric SMPL-X joints is correct for the coordinate contract, but the existing camera (camera.position.set(2.2,1.8,2.8), controls.target (0,0.8,0), grid size 4) was tuned for the normalized 1.8-extent skeleton. A metric body rooted at SMPL-X transl (pelvis ~ -0.35 in Y at rest, plus fitted transl which can be several meters from origin) may render off-frame or tiny.",
+            "suggestion": "In the editorMode path, re-fit the camera to the metric joint bounding box (the existing setPose already computes a box+dist; reuse that on the un-normalized points) and/or recenter display on the pelvis while keeping emitted coords in true metric space."
+          },
+          {
+            "severity": "minor",
+            "area": "License / repo hygiene gate",
+            "problem": "bvh.py/quat.py are confirmed pure-numpy and self-contained (verified), but they have no license header and originate from Sitcom-Crafter (which has a top-level LICENSE that may be non-commercial / research-only, same concern class as the SMPL-X weights). Vendoring them into this repo without checking the parent LICENSE could be a licensing problem even though the code runs.",
+            "suggestion": "Before commit, read /home/wswg3/github/Sitcom-Crafter/LICENSE and the upstream provenance (this quat/bvh math is the Daniel Holden / motion 'quat.py' lineage, typically MIT). Add an SPDX header with correct attribution, or reimplement the ~axis-angle->euler->BVH math in-repo if the parent license is restrictive. The plan already flags this; just make it a hard pre-commit gate, not an open question."
+          },
+          {
+            "severity": "minor",
+            "area": "Plan internal wording",
+            "problem": "The dataFlow/nodeApi text lists the joint correspondence using SMPL-X target indices but labels them 'Lhip->1, Rhip->2 ...' without noting that the H36M SOURCE indices have a different left/right layout (H36M idx1-3=left leg, 4-6=right leg, 11-13=RIGHT arm, 14-16=LEFT arm per inference.py:32-39). The end mapping is correct, but an implementer reading only the plan could wire H36M source indices in the wrong order.",
+            "suggestion": "In joint_maps.py, build the map explicitly from H36M_JOINT_NAMES and JOINT_NAMES by name-matching (not hardcoded ints), and add the assertion the plan already calls for. This removes the left/right-index footgun entirely."
+          }
+        ],
+        "strengths": [
+          "Every critical claim is verifiable and verified: SMPL-X model loads, forward() is differentiable wrt the fitted params, joints are (1,127,3) with [:55] forming a valid kinematic tree, and the joint-name correspondence is anatomically correct.",
+          "The BVH export path is concretely real, not aspirational: an existing reference (Sitcom-Crafter/HSInter/visualization/smplx2bvh.py) implements the exact offsets=rest_pose-rest_pose[parents] + axis-angle->quat->zyx + [:55] + Frames assembly the plan specifies, and its bvh.py/quat.py deps are pure-numpy.",
+          "The plan correctly self-diagnosed the one genuine blocking bug from the prior draft (MSE across mismatched normalized-vs-metric spaces) and resolved it with a mandatory Umeyama similarity transform plus a pre-IK tolerance gate, rather than hand-waving it.",
+          "Method choice is well-justified: it correctly rules out feed-forward regressors (OSX/SMPLer-X/PyMAF-X) because they consume image crops and would ignore ClickPose's HITL-corrected COCO-17 keypoints, which would violate Goal 2.",
+          "Missing deps are accurately characterized and correctly kept off the core path: pyrender/chumpy unused, human_body_prior gated behind use_vposer=False (verified not importable), smplx+trimesh present.",
+          "The editor scope correction is accurate and honest: the existing viewer is genuinely read-only, the new drag/raycast/TransformControls/emit code is correctly budgeted as net-new, TransformControls is genuinely bundled, and the normalizePose coordinate-frame bug is correctly identified and given an explicit contract + no-op-drag test.",
+          "Strong determinism/caching discipline: fixed-seed Adam + IS_CHANGED hashing mirrors the existing Pose3DEditor pattern and the known ClickPose caching pitfall, and the phased steps front-load hard-gate assertions (joint-name alignment, BVH ordering, alignment tolerance)."
+        ]
+      },
+      {
+        "verdict": "approve",
+        "strengths": [
+          "Requirement 1 (SMPL-X output) is SATISFIED with strong grounding: the plan defines a new SMPLX ComfyUI type carrying full parametric body params (global_orient/body_pose/betas/transl + hand/jaw/eye poses), and a SMPLXFitter node that replaces the user-facing MotionAGFormer node. I verified smplx.create on SMPLX_NEUTRAL.npz returns joints (1,127,3) and forward() is differentiable wrt body_pose/global_orient (grad test passed), so the IK-through-forward() approach is mechanically valid. Zero new downloads/heavy deps for the core path.",
+          "Requirement 2 (POSE_KEYPOINTS as input) is SATISFIED and explicit: SMPLXFitter takes pose_keypoints: POSE_KEYPOINTS (COCO-17) directly, reuses the existing, validated coco_to_h36m + normalize_2d + run_lifting pipeline (I confirmed inference.py:103-143 does exactly the COCO-17 -> H36M-17 lift the plan describes, and that the output is width-normalized/root-relative/Y-negated as claimed). HITL corrections flow through unchanged because the same map is reused.",
+          "Requirement 3 (editable 3D joints) is SATISFIED: SMPLXEditor sends the 22 SMPL-X body joints to the viewer; drags emit POSE3D_CORRECTIONS {idx:[x,y,z]} into the existing corrections widget channel; a deterministic Adam IK pass re-solves SMPL-X params and re-displays the converged joints. I verified window.TransformControls AND window.OrbitControls are both bundled (js/three/viewer-bundle-three.js:37227-37228), so the interactive editor needs no new deps.",
+          "The plan is honest about its hardest risk: it correctly identifies that a naive MSE between metric SMPL-X joints and the normalized MotionAGFormer init would collapse/explode, and mandates a Umeyama similarity transform with a pre-IK per-bone-length tolerance gate (Step 2). This was verified as a real space mismatch against inference.py:81-138.",
+          "Joint-index correspondence is verified correct against the live model: JOINT_NAMES[:22] matches the plan's mapping exactly (left_hip=1, right_hip=2, left_knee=4, ..., head=15, left_wrist=20, right_wrist=21). The (1,127,3) -> [:, :55, :] slice and the nose-at-index-55 boundary are real; the Step-1 name-alignment hard gate is a sound regression guard.",
+          "Caching correctness is addressed proactively: all three nodes define deterministic IS_CHANGED (params+corrections+size+seed) and fixed-seed Adam, mirroring the existing Pose3DEditor.IS_CHANGED (verified at lines 224/472) and avoiding the documented ClickPose caching bug.",
+          "The plan correctly catches that the current viewer is read-only (only VIEWER_READY/loadPose3D/normalizePose, verified at viewer_pose3d.html:94-160), that drag/emit is net-new (the POSE3D_CORRECTIONS emit currently originates only from the 2D modal at extension.js:380-387), and that normalizePose (the 1.8/max-extent rescale) must be bypassed so emitted coords are true SMPL-X metric. It de-risks with a single-sphere spike."
+        ],
+        "issues": [
+          {
+            "severity": "minor",
+            "area": "Requirement 3 / edit fidelity (editorApproach, risks)",
+            "problem": "Edits map to params via IK with betas frozen and no pose prior by default (use_vposer=False, human_body_prior not importable). For over-determined or anatomically implausible drags the handle will NOT land on the target, so 'editable' means 'editable-as-targets-then-re-solved', not direct manipulation. This is an honest, documented limitation, not a violation of requirement 3, but it is a UX gap the user should accept explicitly.",
+            "suggestion": "Keep the plan's mitigation (re-display converged joints + optional target-ghost overlay) and surface it in PLAN.md as an accepted Phase-1 behavior. Consider making the target-ghost overlay default-on during Step 5 so drift is visible from first use."
+          },
+          {
+            "severity": "minor",
+            "area": "joints_3d 55-slice semantics (dataType)",
+            "problem": "joints_3d = forward().joints[:, :55, :] and joint_names == JOINT_NAMES[:55] includes jaw(22), eyes(23-24) and all 30 finger joints(25-54) which I verified are zero-posed and carry no fitted information in Phase 1. Carrying them is harmless but the 'first 22 are body' wording could mislead an implementer into editing/exporting finger joints.",
+            "suggestion": "Explicitly document that only indices 0-21 are editable/constrained and that 22-54 are pass-through zeros in Phase 1; the BVH writer already assembles zeros for jaw/eyes/hands, so just add a one-line comment in joint_maps.py and the SMPLX schema."
+          },
+          {
+            "severity": "minor",
+            "area": "License gating (utils/bvh.py, quat.py)",
+            "problem": "The plan vendors numpy-only bvh.py/quat.py from Sitcom-Crafter with no upstream license header and gates a commit on tracing/verifying the license or reimplementing. This is a real pre-commit blocker the orchestrator must not skip, but it does not affect any of the 3 requirements.",
+            "suggestion": "Treat the license trace as a hard Step-0 gate (as written). If unclear, reimplement the small axis-angle->euler->BVH math in-repo to avoid the dependency entirely; the math is small enough that this is low-cost insurance."
+          }
+        ],
+        "summary": "All three explicit requirements are SATISFIED with evidence verified against the live codebase and runtime. (1) SMPL-X output: a new SMPLX type + SMPLXFitter node replaces user-facing MotionAGFormer; smplx.forward() confirmed to return (1,127,3) joints and be differentiable wrt body_pose/global_orient (grad test passed), making the IK approach valid. (2) POSE_KEYPOINTS input: SMPLXFitter consumes COCO-17 POSE_KEYPOINTS directly and reuses the verified coco_to_h36m/normalize_2d/run_lifting lift (inference.py:103-143). (3) Editable joints: SMPLXEditor drives the bundled window.TransformControls (verified at viewer-bundle-three.js:37227-37228), emits POSE3D_CORRECTIONS into the existing corrections widget (extension.js:503), and re-solves via deterministic IK. Joint-index correspondence, the (1,127,3)->[:,:55,:] slice, JOINT_NAMES[:22] body order, the read-only viewer status, and the MotionAGFormer normalized/Y-negated output were all independently confirmed. The plan's central technical risk (metric vs normalized space mismatch) is correctly identified and addressed with a mandated Umeyama similarity transform plus a pre-IK tolerance gate. No blocking issues. Remaining items are minor: edit-fidelity is target-then-re-solve (not direct, honestly documented), the 55-joint slice semantics should be clarified for implementers, and the vendored bvh.py/quat.py license must be traced or the math reimplemented before commit. Verdict: approve."
+      }
+    ]
+  }
+]

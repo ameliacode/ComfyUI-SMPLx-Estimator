@@ -1,0 +1,168 @@
+{
+  "overview": "HYBRID front-end replacing MotionAGFormer with SMPL-X output. Pipeline: ClickPose POSE_KEYPOINTS (COCO-17, HITL-corrected, single image, single person) -> one new node SMPLXFit (Stage 1 fast init + Stage 2 VPoser-regularized SMPLify-X polish, optimizing DIRECTLY in SMPL-X parameter space, NO chumpy/pyrender) -> SMPLX type dict (settled schema) -> existing three.js viewer extended into a draggable SMPL-X body-joint editor (SMPLXEditor) -> SMPLXToBVH. Core thesis (verified, all three critics agree it is correct): optimize directly in SMPL-X param space rather than adding a vertex-output regressor, because every confirmed-checkpoint init model (Pose2Mesh/GTRS/GATOR) emits 6890 VERTICES needing a vertex->param fit that is itself an optimization, AND requires an SMPL body model that is NOT on disk (weights/smpl/ holds only Marker2SMPL*.ckp; the SMPLX_*.pkl that DO exist are SMPL-X, not SMPL). Direct-in-SMPL-X init needs ZERO new downloads (SMPLX .npz + VPoser .ckpt on disk, human_body_prior source on disk), no SMPL->SMPL-X transfer, no chumpy. CRITICAL CHANGE FROM PRIOR PLAN: the USER DECISION fixes Stage 1 as a 'FAST FEED-FORWARD keypoints->SMPL model'. The prior plan silently reinterpreted this as an in-house optimization. That reinterpretation is now SURFACED as an explicit decision-point requiring user sign-off (see openQuestions[0] and initStage) rather than buried in rationale -- because no param-output feed-forward model with a confirmed checkpoint+permissive license+COCO-17 input is on disk, and the only candidate (GATOR) emits SMPL needing the missing SMPL body model. Default (pending user ratification) is a fast cold solve labeled honestly as 'optimization-based init, not feed-forward'; GATOR remains the pre-scoped fallback IF the user mandates a true learned init. ENV-VERIFIED THIS SESSION: load_model returns a TUPLE (model,cfg) not a bare model; model_loader.py imports loguru at module level; loguru AND human_body_prior are NOT importable in the ComfyUI venv (blocking); omegaconf, transforms3d, PyYAML ARE present; human_body_prior pyproject pins torch>=2.5,<2.6 + python>=3.11,<3.13 which conflict with the env's torch 2.11/py3.10 -> install MUST use --no-deps. body_pose(63)=joints 1..21 (joint 0 pelvis IS global_orient, never inside body_pose). Three.js viewer already bundles TransformControls and extension.js already wires VIEWER_READY/POSE3D_CORRECTIONS/loadPose3D, so the JS dragging half is additive; the Python betas-frozen inverse re-solve is the net-new hard half and is budgeted separately.",
+  "initStage": "DECISION-POINT (raised to user, NOT silently chosen): the USER DECISION fixes Stage 1 as a FAST FEED-FORWARD keypoints->SMPL model. No such model is usable as-is on disk: (a) confirmed-checkpoint regressors GATOR/Pose2Mesh/GTRS emit 6890 VERTICES, needing a vertex->param fit that is itself an optimization (erasing 'instant') AND an SMPL body model that is NOT on disk (verified: weights/smpl/ has only Marker2SMPL*.ckp; the SMPLX_{NEUTRAL,MALE,FEMALE}.pkl present are SMPL-X bodies, not SMPL); (b) the one param-output model, Key2Mesh, has UNCONFIRMED checkpoint download + UNCONFIRMED license + OpenPose-25 input (no COCO-17 feed) = blocking; (c) image-based SMPL-X regressors (OSX/SMPLer-X) need an RGB crop + ViT backbone + checkpoint, contradicting the keypoints-only stage contract. So two real forks are presented for sign-off: OPTION A (proposed default) -- replace the feed-forward requirement with a fast OPTIMIZATION-BASED init in SMPL-X space (honestly NOT feed-forward, NOT instant in the learned-model sense): Stage-0 camera warmup (~30 iters, optimize transl+global_orient only, body frozen, betas=0) then a short body-pose L-BFGS pass against on-disk SMPLX_NEUTRAL.npz using the 12 mappable COCO-17 body joints. Zero downloads, but weaker on extreme/occluded poses (local-minimum risk). OPTION B (if user mandates true feed-forward) -- add GATOR (COCO-17 native, MIT, Google-Drive ckpt), which emits SMPL params; this then REQUIRES sourcing an SMPL body model .pkl from MPI registration (NOT on disk) and the by-name SMPL->SMPL-X direct-63-D slice. B is the primary path only if the user holds firm on 'feed-forward'. The plan is built so either init slots into the SAME JointMapper and Stage 2 without redesign. CHECKPOINT/LICENSE for Option A: none new; reuses SMPLX_NEUTRAL.npz (MPI non-commercial, load-by-path, out of repo). OUTPUT of Stage 1 (either option): an in-memory SMPL-X param dict (global_orient, body_pose=63, betas, transl) handed to Stage 2 -- no serialization, no SMPLX type emitted until after polish. ENGINEERING BASELINE GUARDRAIL (addresses over-engineering critique): the simplest honest baseline is Stage-0 warmup + ONE VPoser-regularized solve from mean pose. The separate raw-axis-angle Stage-1 body pre-solve is only added if P2 benchmarking shows the single solve lands in bad minima -- measured, not assumed.",
+  "polishStage": "Stage 2 = SMPLify-X-style polish, pure PyTorch + smplx + torch.autograd (NO chumpy, NO pyrender; verified differentiable end-to-end on L40S). VPOSER LOAD (corrected per verification): vp_model, _ = load_model(expr_dir='.../vposer_v2_0', model_code=VPoser, remove_words_in_model_weights='vp_model.') -- load_model returns a TUPLE (model_instance, model_cfg) (verified model_loader.py:98); MUST unpack, the prior `vp_model.encode(...)` on the bare return would AttributeError. P0 smoke test must: import after --no-deps install + loguru install, load VPoser, run decode(encode(zero_pose).mean) round-trip, assert pose_body shape (B,21,3)=63-D, and assert the remove_words prefix-strip matches the ckpt's state_dict keys (load_model reads ['state_dict'] directly; lightning not required to load). WARM-START: encode Stage-1 body_pose to latent via vp_model.encode(pose_body).mean (deterministic Normal.mean, NOT .rsample -- verified encode returns torch.distributions.Normal); take Stage-1 transl + global_orient verbatim. NOTE (manifold round-trip caveat): a raw unconstrained Stage-1 pose may sit off the VPoser manifold so encode->decode is lossy; P2 verifies decode(encode(stage1)).reproj ~= stage1 reproj, else rely on the first high-lambda annealed iter to pull it back (this is the explicit GATOR-init trigger). FREE VARS: {poZ_body(32), global_orient(3), transl(3)} always; betas(10) optimized ONLY in a short early window then FROZEN for all later iters and all editor re-solves (scale-ambiguity mitigation, see risks). Hands/jaw/eyes/expression frozen at zero. L-BFGS lr=1.0, line_search_fn='strong_wolfe'. REPROJECTION: COCO-17 body-only. JointMapper built BY NAME-STRING (guardrail): COCO L/R shoulder->16/17, elbow->18/19, wrist->20/21, hip->1/2, knee->4/5, ankle->7/8 into smplx.forward().joints (indices verified against smplx.JOINT_NAMES this session); COCO nose/eyes/ears gamma=0. Per-joint weight gamma_i = ClickPose score. Loss = Geman-McClure robust 2D reprojection of decode(poZ_body)+global_orient+transl through a perspective camera + VPoser L2 latent prior (lambda_pose annealed high->low) + betas L2 (only while betas free) + knee/elbow bending prior. CAMERA: perspective, f=max(H,W) px, principal point = image center from POSE_KEYPOINTS image_size; expose focal as optional FLOAT. ITERATION BUDGET: baseline = Stage-0 warmup + 2 annealed VPoser stages x ~25 L-BFGS iters; the separate raw Stage-1 pass is conditional on benchmarking. Est wall-clock on L40S <8s. DETERMINISM: (1) .mean not .rsample; (2) torch.manual_seed(seed) before each solve; (3) fixed L-BFGS max_iter with tolerance_change/grad disabled so step count is data-independent; (4) lambda_C=0 (no collision/CUDA BVH); (5) determinism ASSERTED WITH TOLERANCE (max abs param delta < 1e-5) not bit-equality -- strong_wolfe on CUDA has non-associative-reduction jitter even at fixed iters; alternatively cache the solved SMPLX dict keyed by the IS_CHANGED hash so editor re-display is stable. IS_CHANGED hash MUST include: keypoints, scores, corrections, image_size, gender, smplx_model_path, vposer_path, betas_frozen, init_iters, polish_iters, focal, seed (path inputs added per critique -- swapping NEUTRAL->MALE npz path must not be cached away). OUTPUT: SMPLX dict with converged params + joints_3d = smplx.forward().joints[:, :55, :] (world-metric meters) + joint_names.",
+  "smplToSmplx": "PRIMARY PATH (Option A): NO SMPL->SMPL-X transfer -- init is done DIRECTLY in SMPL-X parameter space against on-disk SMPLX_NEUTRAL.npz, so body_pose is born as SMPL-X axis-angle and feeds Stage 2 with no conversion. INDEX SEMANTICS (corrected per critique): global_orient(3) = joint 0 = pelvis; body_pose(63) covers joints 1..21 (left_hip..right_wrist) -- pelvis is NEVER inside body_pose (verified against smplx.JOINT_NAMES). The prior plan's '0-21 = pelvis..right_wrist inside body_pose' was an off-by-one and is corrected; the JointMapper forward().joints indices (1/2 hip..20/21 wrist) were and remain correct. This sidesteps the missing SMPL body model (weights/smpl/ has no SMPL .pkl) and the SMPL/SMPL-X joint-location discrepancy. BACKUP PATH (Option B, only if user mandates feed-forward init via GATOR): GATOR emits SMPL; transfer via direct slice smpl_body_pose[:, :63] -> SMPL-X body_pose (joints 1..21), global_orient/betas/transl verbatim, hands/jaw/eyes/expression zero. This backup ALSO requires sourcing an SMPL body model .pkl from MPI (NOT on disk) for GATOR's own forward/vertex stage. The by-name guardrail + asymmetric one-arm-raised fixture MUST verify GATOR's joint order before the slice (a near-symmetric L/R swap passes reprojection silently). For both paths the by-name guardrail applies to the COCO-17 -> SMPL-X JointMapper.",
+  "nodeApi": {
+    "nodes": [
+      {
+        "name": "SMPLXFit",
+        "inputs": [
+          "pose_keypoints: POSE_KEYPOINTS (COCO-17 absolute px, scores, image_size -- unchanged ClickPose output)",
+          "smplx_model_path: STRING (abs path to on-disk MPI SMPLX_*.npz; validated at load with explicit error if absent; included in IS_CHANGED)",
+          "vposer_path: STRING (abs path to .../vposer_v2_0 expr_dir; in IS_CHANGED)",
+          "gender: COMBO[neutral,male,female]",
+          "device: COMBO[auto,cuda,cpu]",
+          "init_iters: INT (Stage-0/1 iters, default 30; in IS_CHANGED)",
+          "polish_iters: INT (Stage-2 per-stage L-BFGS iters, default 25; in IS_CHANGED)",
+          "focal: FLOAT (optional, default 0 -> auto f=max(H,W); in IS_CHANGED)",
+          "betas_frozen: BOOLEAN (default false on first solve; in IS_CHANGED)",
+          "seed: INT (determinism; in IS_CHANGED)",
+          "corrections: STRING optional (POSE3D_CORRECTIONS JSON from editor; betas frozen on re-solve)"
+        ],
+        "outputs": [
+          "smplx: SMPLX (settled dict: global_orient,body_pose,betas,transl,left/right_hand_pose,jaw/leye/reye_pose,expression,gender,model_path,joints_3d=(55,3) world-metric,joint_names)"
+        ],
+        "purpose": "Replaces MotionAGFormer. Stage1 fast init (Option A optimization-based, pending user sign-off) + Stage2 VPoser-regularized body-only SMPLify-X polish from COCO-17 in SMPL-X param space. Emits SMPLX type. On corrections re-solve with betas frozen and re-emit converged joints. OUTPUT_NODE: pushes joints_3d[:22]+joint_names to JS via ui dict for the editor. Solve result cached by IS_CHANGED hash for stable editor re-display under GPU nondeterminism."
+      },
+      {
+        "name": "SMPLXEditor",
+        "inputs": [
+          "smplx: SMPLX",
+          "size: INT (parity with existing editor)",
+          "corrections: STRING optional (hidden widget; POSE3D_CORRECTIONS = {jointIdx:[x,y,z]} metric from dragged spheres)"
+        ],
+        "outputs": [
+          "smplx: SMPLX (re-solved: short betas-frozen AND global_orient/transl-frozen IK pass so a dragged body joint maps to body_pose only, target NOT guarantee; re-emits CONVERGED joints_3d)",
+          "corrections: STRING (passthrough for re-feeding SMPLXFit if single-node design chosen)"
+        ],
+        "purpose": "Extends EXISTING read-only three.js viewer into a draggable editor on the 22 SMPL-X body joints. BYPASS viewer normalizePose() so dragged coords are TRUE metric. Emits POSE3D_CORRECTIONS; Python maps edits back via a NET-NEW betas/orient/transl-frozen 3D-target re-solve in fit.py (shares Stage-2 loss with a 3D-target term instead of 2D reprojection) and re-displays converged joints. De-risk with single-sphere spike + a unit test (drag one joint 5cm, assert converged joint moves toward target and others stay within tolerance) BEFORE wiring all 22 joints."
+      },
+      {
+        "name": "SMPLXToBVH",
+        "inputs": [
+          "smplx: SMPLX",
+          "filename_prefix: STRING (default mocap/)",
+          "fps: INT (default 30)"
+        ],
+        "outputs": [
+          "bvh_path: STRING (written under output/mocap/)"
+        ],
+        "purpose": "Single pose -> Frames:2 BVH. Rest-pose offsets from smplx.forward(betas only, zero pose). Axis-angle->euler in exact 55-name SMPL-X order. Vendored bvh.py/quat.py: source repo + license named and verified BEFORE P5 (not at commit time). Document that BVH root translation is approximate (single-image scale ambiguity)."
+      }
+    ]
+  },
+  "filesToAddOrChange": [
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/modules/smplx_fit/__init__.py",
+      "change": "NEW empty package init."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/modules/smplx_fit/model.py",
+      "change": "NEW. SMPL-X body model loader (smplx.create from on-disk .npz, gender, eval, grads off, cached by (path,gender,device)); VPoser loader: vp_model, _ = load_model(expr_dir, VPoser, remove_words_in_model_weights='vp_model.') -- MUST tuple-unpack (load_model returns (model,cfg), verified); eval+grads off, latentD=32; explicit error if MPI weights or VPoser expr_dir absent."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/modules/smplx_fit/joint_map.py",
+      "change": "NEW. BY-NAME COCO-17 -> SMPL-X forward().joints index map (shoulder16/17 elbow18/19 wrist20/21 hip1/2 knee4/5 ankle7/8) + per-joint active mask (nose/eyes/ears inactive). Single source of truth; asserts names against smplx.JOINT_NAMES, never bare indices. Document: global_orient=joint0=pelvis, body_pose(63)=joints1..21."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/modules/smplx_fit/fit.py",
+      "change": "NEW. Perspective camera (f=max(H,W) or user focal), Geman-McClure robust 2D reprojection, VPoser encode(.mean)/decode (tuple-unpacked model), Stage-0 camera/orient warmup, baseline single VPoser-regularized solve (separate raw Stage-1 pass conditional on benchmarking), 2-stage annealed polish, betas-window-then-freeze, AND a NET-NEW 3D-target betas/orient/transl-frozen re-solve for editor corrections. Deterministic L-BFGS (fixed max_iter, tolerances disabled, manual_seed). Returns SMPLX dict incl joints_3d[:55]."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/modules/smplx_fit/bvh.py",
+      "change": "NEW (vendored). SMPL-X 55-name skeleton hierarchy, rest offsets from forward(betas), axis-angle->euler, Frames:2 writer. SOURCE REPO + LICENSE named and verified before P5."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/modules/smplx_fit/quat.py",
+      "change": "NEW (vendored). Rotation conversions. SOURCE REPO + LICENSE named and verified before P5."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/nodes/smplx_nodes.py",
+      "change": "NEW. SMPLXFit, SMPLXEditor, SMPLXToBVH classes with full IS_CHANGED determinism hashes (incl model/vposer paths, iters, focal, betas_frozen, seed) and ui-dict push of joints to JS; cache solved dict by hash."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/nodes/__init__.py",
+      "change": "Register SMPLXFit/SMPLXEditor/SMPLXToBVH in NODE_CLASSES + NODE_CLASS_MAPPINGS. Keep MotionAGFormer registered but drop from default SMPL-X path."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/__init__.py",
+      "change": "Add the three new display-name mappings."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/js/viewer_pose3d.html",
+      "change": "EXTEND: switch skeleton H36M-17 -> SMPL-X 22-body; add draggable spheres on 22 joints + raycaster + TransformControls (already in bundle); BYPASS normalizePose for true metric; emit POSE3D_CORRECTIONS. Reuse-heavy JS half (~120-180 LOC)."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/js/extension.js",
+      "change": "Add a node branch wiring SMPLXFit/SMPLXEditor to the existing iframe viewer (loadPose3D/VIEWER_READY/POSE3D_CORRECTIONS handlers already present); parse new smplx_json ui payload."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/web/viewer_pose3d.html",
+      "change": "DELETE -- dead duplicate (served dir is js/, WEB_DIRECTORY='./js'). Remove dead web/ tree (web/pose_editor.js, web/three) to avoid confusion."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/requirements.txt",
+      "change": "Add smplx, trimesh (installed). Add loguru (verified MISSING -- VPoser load_model imports it at module level, blocking). omegaconf, transforms3d, PyYAML already present (verified) but pin them explicitly for safety. Add human_body_prior install NOTE that it MUST be --no-deps (pyproject pins torch>=2.5,<2.6 + py>=3.11,<3.13, conflicting with env torch 2.11/py3.10). Do NOT add chumpy/pyrender."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/install.py",
+      "change": "pip install -e /home/wswg3/github/human_body_prior --no-deps (NOT plain -e: torch/python pins would downgrade torch 2.11 and break ComfyUI); then pip install loguru (and assert omegaconf/transforms3d/PyYAML importable). Importable-check gate for human_body_prior AND loguru before Stage 2 can run."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/tests/__init__.py",
+      "change": "NEW. Empty or conftest sys.path shim so tests can import modules.smplx_fit (tests/ does not yet exist; CLAUDE.md mandates pytest -v passes before commit)."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/tests/test_joint_map.py",
+      "change": "NEW. Asymmetric one-arm-raised fixture asserting COCO->SMPL-X map preserves chirality (guardrail); assert fit reduces reprojection error vs init."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/tests/test_determinism.py",
+      "change": "NEW. Run fit twice on identical input, assert max abs param delta < 1e-5 (tolerance, not bit-equality -- CUDA strong_wolfe jitter). Optionally run on CPU for the assertion."
+    },
+    {
+      "path": "/home/wswg3/project/comfyui-mocap/.claude/PLAN.md",
+      "change": "Rewrite Stage 2/3: MotionAGFormer -> SMPLXFit(init+polish) -> SMPLXEditor -> SMPLXToBVH; SMPL-X output; new SMPLX type; remove MotionAGFormer/Pose3DEditor from active path. Record the Stage-1 feed-forward decision-point and the user's ratification."
+    }
+  ],
+  "modelsNeeded": [
+    "SMPLX_NEUTRAL/MALE/FEMALE.npz -- ALREADY ON DISK at /home/wswg3/github/Sitcom-Crafter/weights/smplx/ (verified; SMPLX_*.pkl ALSO present but .npz is preferred); MPI non-commercial; load by path, keep OUT of repo",
+    "VPoser v2 (vposer_v2_0) -- ALREADY ON DISK; snapshots/V02_05.ckpt -> ../../vposer_v2_0.ckpt symlink VERIFIED present; load by expr_dir. NOTE: a successful load_model UNDER the ComfyUI venv is UNVERIFIED (human_body_prior not yet importable) -- hard P0 gate",
+    "human_body_prior -- source at /home/wswg3/github/human_body_prior; MUST be pip install -e --no-deps (pyproject pins torch>=2.5,<2.6 + py>=3.11,<3.13 conflict with env torch 2.11/py3.10 -- VERIFIED). Currently NOT importable (VERIFIED ModuleNotFoundError)",
+    "loguru -- VERIFIED MISSING in ComfyUI venv; required (model_loader.py imports it at module level); pip install loguru in install.py",
+    "omegaconf, transforms3d, PyYAML -- VERIFIED ALREADY PRESENT (the prior plan and one critic were imprecise about these); pin in requirements for safety",
+    "smplx 0.1.28 + trimesh 4.11.5 -- VERIFIED importable",
+    "NO new MODEL downloads required for Option A. (Option B / GATOR ONLY, deferred unless user mandates feed-forward init: GATOR MIT ckpt from Google Drive + an SMPL body model .pkl from MPI registration -- the SMPL .pkl is NOT on disk and would be a new required asset)"
+  ],
+  "phasedSteps": [
+    "P-1 USER SIGN-OFF (blocking, before any code): surface the Stage-1 fork. The fixed USER DECISION says feed-forward; no usable feed-forward param-output model is on disk. Ask the user to ratify Option A (fast optimization-based init, no download, honestly not feed-forward) vs Option B (GATOR feed-forward init, requires sourcing an SMPL .pkl from MPI + Google-Drive ckpt). Do not start P0 until ratified.",
+    "P0 Deps+guardrail: pip install -e human_body_prior --no-deps; pip install loguru; assert omegaconf/transforms3d/PyYAML import. Smoke-test VPoser: vp_model,_=load_model(...); decode(encode(zero_pose).mean); assert (B,21,3) and prefix-strip matches state_dict keys. Add tests/__init__.py + tests/test_joint_map.py asymmetric fixture; write joint_map.py BY NAME and make the test green BEFORE any solver code. HARD GATE.",
+    "P1 Init solver: perspective camera + COCO-17 body-only reprojection + Stage-0 camera/orient warmup + (Option A) zero-init body-pose solve against SMPLX_NEUTRAL.npz, or (Option B) GATOR init + by-name SMPL->SMPL-X slice; output coarse SMPL-X param dict; deterministic (manual_seed, fixed max_iter).",
+    "P2 Polish + BASELINE-FIRST: implement the SIMPLEST recipe (Stage-0 warmup + ONE VPoser-regularized solve) and BENCHMARK it; only add the separate raw Stage-1 pass if it lands in bad minima (measured). Add VPoser encode(.mean)/decode (tuple-unpacked), 2-stage annealed priors, betas-window-then-freeze. Assemble SMPLX dict incl joints_3d[:55]. Verify decode(encode(stage1)).reproj ~= stage1. Benchmark <8s on L40S. Add tests/test_determinism.py (delta<1e-5).",
+    "P3 SMPLXFit node: wire modules into nodes/smplx_nodes.py with full IS_CHANGED hash (paths+iters+focal+seed), cache solved dict by hash, push joints to JS via ui dict; run ClickPose -> SMPLXFit end-to-end on a real image.",
+    "P4 Editor (two workstreams): (a) JS dragging -- single-sphere spike in viewer_pose3d.html (normalizePose bypass + POSE3D_CORRECTIONS round-trip), then 22 joints; (b) NET-NEW Python betas/orient/transl-frozen 3D-target re-solve in fit.py with its own unit test (drag 5cm, converged joint moves toward target, others within tolerance) BEFORE full UI. Delete dead web/ tree.",
+    "P5 BVH: name + verify source repo and license for vendored bvh.py/quat.py (resolve here, not at commit); SMPLXToBVH Frames:2 export with rest offsets from forward(betas) and 55-name axis-angle->euler ordering; validate the .bvh opens in a DCC tool; document approximate root translation.",
+    "P6 Cleanup+docs: remove MotionAGFormer/Pose3DEditor from default SMPL-X graph and PLAN; update requirements/install; full ClickPose -> SMPLXFit -> SMPLXEditor -> SMPLXToBVH run; record the P-1 ratification."
+  ],
+  "risks": [
+    "Depth/scale ambiguity (single uncalibrated image, f=max(H,W), no feet in COCO-17): global transl and overall scale weakly constrained body-only; betas absorb scale error and joints_3d (consumed by BVH+editor) inherit it -- a silent quality bug only visible in a DCC tool. Mitigation HARDENED per critique: for the body-mocap use case prefer fixing betas to neutral mean (or a tiny betas window then FREEZE) rather than fitting 10 betas against 12 noisy 2D joints; freeze betas on ALL editor re-solves; document that absolute transl/scale is approximate; expose focal.",
+    "FIXED-DECISION reversal (Stage 1 feed-forward): surfaced as P-1 user sign-off, not absorbed in rationale. If user mandates feed-forward, Option B (GATOR) requires sourcing an SMPL body .pkl NOT on disk -- a new dependency the user must accept.",
+    "Self-init local minima (Option A): no learned prior in Stage 1 can land in a bad minimum on extreme/occluded poses. Explicit trigger to enable Option B; P1/P2 built so a regressor init slots in without touching JointMapper or Stage 2.",
+    "Left/right silent swap: COCO/SMPL/SMPL-X orders differ; near-symmetric swap passes reprojection. Hard-gated by BY-NAME map + asymmetric-pose test at P0; do not proceed until green.",
+    "ComfyUI caching vs HITL edits: IS_CHANGED MUST hash keypoints+scores+corrections+image_size+gender+smplx_model_path+vposer_path+betas_frozen+init_iters+polish_iters+focal+seed (paths added per critique -- swapping NEUTRAL->MALE npz path must not be cached away). This exact bug already bit the ClickPose node.",
+    "L-BFGS GPU nondeterminism: strong_wolfe + non-associative CUDA reductions give run-to-run float jitter even at fixed iters; bit-identical params NOT guaranteed. Assert determinism with tolerance (delta<1e-5) or run determinism test on CPU; cache solved dict by IS_CHANGED hash so editor re-display is stable.",
+    "human_body_prior install friction (VERIFIED blocking): pyproject pins torch>=2.5,<2.6 + py>=3.11,<3.13 vs env torch 2.11/py3.10 -> plain pip install -e would downgrade torch and break ComfyUI. MUST use --no-deps. loguru VERIFIED MISSING and imported at module level by load_model -> Stage 2 cannot import VPoser without it. Both gated at P0.",
+    "VPoser API contract (VERIFIED): load_model returns TUPLE (model,cfg) (model_loader.py:98) -- MUST unpack; prior `vp_model.encode(...)` on bare return would AttributeError. P0 smoke test proves tuple-unpack + prefix-strip + encode(.mean)/decode shapes before solver depends on them.",
+    "VPoser manifold round-trip: raw Stage-1 pose may be off-manifold so encode->decode warm start is lossy on extreme poses; verify in P2, else lean on first high-lambda annealed iter or Option B.",
+    "Editor inverse re-solve is NET-NEW and undersold by 'additive' framing: existing Pose3DEditor overwrites coords directly (no solve); the new drag->betas/orient/transl-frozen IK re-solve can fail to converge or oscillate on re-queue. Budget as a separate workstream with its own unit test before the 22-joint UI; freeze global_orient+transl so a dragged body joint maps to body_pose only (Z-drag does not get absorbed by camera).",
+    "body_pose index off-by-one (corrected): global_orient=joint0=pelvis; body_pose(63)=joints1..21. An implementer following the prior '0..21 inside body_pose' would corrupt reprojection/BVH. Documented in joint_map.py.",
+    "Vendored bvh.py/quat.py licensing: name + verify upstream source and license at P5 (not commit time); if GPL/unknown, may block vendoring into this package. SMPL-X weights stay out of repo (MPI non-commercial)."
+  ],
+  "openQuestions": [
+    "P-1 DECISION (blocking, needs user): Stage 1 as Option A (fast optimization-based init -- no download, NOT feed-forward, weaker on hard poses) vs Option B (GATOR feed-forward init -- COCO-17 native, MIT, but emits SMPL and REQUIRES sourcing an SMPL body .pkl from MPI that is NOT on disk). The fixed decision says feed-forward; if held firm, B is primary. Plan defaults to A pending ratification.",
+    "Single combined SMPLXFit node (corrections re-feed) vs separate SMPLXFit + SMPLXEditor -- pick during P3/P4 based on iframe corrections round-trip vs ComfyUI re-queue semantics.",
+    "betas policy: fix betas=0 (neutral mean) for body mocap vs a short betas window then freeze -- leaning fix-or-early-freeze for scale stability; expose as toggle only if benchmarking demands.",
+    "Whether the separate raw-axis-angle Stage-1 pass is needed at all, or the single VPoser-regularized solve suffices -- decided by P2 benchmark numbers."
+  ]
+}

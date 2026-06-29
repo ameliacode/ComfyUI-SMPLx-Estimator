@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <style>
+        body { margin: 0; overflow: hidden; background: #2a2a2a; }
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #888;
+            font-size: 13px;
+            font-family: monospace;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">Waiting for pose data…</div>
+    <script src="./three/viewer-bundle-three.js"></script>
+    <script>
+        // ── H36M-17 skeleton ──────────────────────────────────────────────────
+        const H36M_LIMBS = [
+            [0,1],[1,2],[2,3],              // left leg
+            [0,4],[4,5],[5,6],              // right leg
+            [0,7],[7,8],[8,9],[9,10],       // spine → head
+            [8,11],[11,12],[12,13],         // right arm
+            [8,14],[14,15],[15,16],         // left arm
+        ];
+
+        // Per-bone colors: left=blue, right=red, spine=green
+        const BONE_COLORS = [
+            0x4d88ff, 0x4d88ff, 0x4d88ff,
+            0xff4d4d, 0xff4d4d, 0xff4d4d,
+            0x44cc88, 0x44cc88, 0x44cc88, 0x44cc88,
+            0xff4d4d, 0xff4d4d, 0xff4d4d,
+            0x4d88ff, 0x4d88ff, 0x4d88ff,
+        ];
+
+        // ── Scene setup ───────────────────────────────────────────────────────
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x2a2a2a);
+
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(2.2, 1.8, 2.8);
+
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        document.body.appendChild(renderer.domElement);
+
+        const controls = new OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.enableZoom = false;        // built-in wheel zoom is delta-dependent + bulky
+        controls.target.set(0, 0.8, 0);
+        controls.update();
+
+        // Custom fine zoom: a FIXED small step per wheel notch, independent of the
+        // scroll-delta magnitude (mice/trackpads send wildly different deltas).
+        const ZOOM_STEP = 1.03;             // ~3% per notch — lower = finer
+        renderer.domElement.addEventListener("wheel", (ev) => {
+            ev.preventDefault();
+            const factor = ev.deltaY > 0 ? ZOOM_STEP : 1 / ZOOM_STEP;
+            const offset = camera.position.clone().sub(controls.target);
+            let dist = offset.length() * factor;
+            dist = Math.max(controls.minDistance || 0.05, Math.min(controls.maxDistance || 50, dist));
+            offset.setLength(dist);
+            camera.position.copy(controls.target).add(offset);
+            controls.update();
+        }, { passive: false });
+
+        scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+        const key = new THREE.DirectionalLight(0xffffff, 0.8);
+        key.position.set(5, 10, 7);
+        scene.add(key);
+        const fill = new THREE.DirectionalLight(0xffffff, 0.3);
+        fill.position.set(-5, -5, -7);
+        scene.add(fill);
+
+        scene.add(new THREE.GridHelper(4, 20, 0x444444, 0x222222));
+
+        // ── Bone cylinders (pre-created, scaled at runtime) ───────────────────
+        const boneGeo = new THREE.CylinderGeometry(0.012, 0.012, 1, 8);
+        const boneMeshes = H36M_LIMBS.map((_, i) => {
+            const m = new THREE.Mesh(
+                boneGeo,
+                new THREE.MeshPhongMaterial({
+                    color: BONE_COLORS[i],
+                    emissive: BONE_COLORS[i],
+                    emissiveIntensity: 0.15,
+                    shininess: 35,
+                })
+            );
+            m.visible = false;
+            scene.add(m);
+            return m;
+        });
+
+        // ── Helpers ───────────────────────────────────────────────────────────
+        const _up  = new THREE.Vector3(0, 1, 0);
+        const _a   = new THREE.Vector3();
+        const _b   = new THREE.Vector3();
+        const _mid = new THREE.Vector3();
+        const _dir = new THREE.Vector3();
+
+        function normalizePose(rawJoints) {
+            const pts = rawJoints.map(([x, y, z]) => new THREE.Vector3(x, y, z));
+            const box = new THREE.Box3().setFromPoints(pts);
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const scale = 1.8 / Math.max(size.x, size.y, size.z, 1e-5);
+            return pts.map(p => p.sub(center).multiplyScalar(scale).toArray());
+        }
+
+        function setPose(joints) {
+            const pts = normalizePose(joints);
+
+            // Fit camera
+            const box = new THREE.Box3();
+            pts.forEach(p => box.expandByPoint(new THREE.Vector3(...p)));
+            const center = box.getCenter(new THREE.Vector3());
+            const size   = box.getSize(new THREE.Vector3());
+            const dist   = Math.max(size.x, size.y, size.z, 0.8) * 2.4;
+            camera.position.set(center.x + dist, center.y + dist * 0.7, center.z + dist);
+            controls.target.copy(center);
+            controls.minDistance = 0.2;
+            controls.maxDistance = Math.max(12, dist * 4);
+            controls.update();
+
+            // Update bone cylinders
+            for (let i = 0; i < H36M_LIMBS.length; i++) {
+                const [ia, ib] = H36M_LIMBS[i];
+                _a.set(...pts[ia]);
+                _b.set(...pts[ib]);
+                _mid.addVectors(_a, _b).multiplyScalar(0.5);
+                _dir.subVectors(_b, _a);
+                const len = Math.max(_dir.length(), 1e-5);
+                _dir.normalize();
+
+                boneMeshes[i].position.copy(_mid);
+                boneMeshes[i].scale.set(1, len, 1);
+                boneMeshes[i].quaternion.setFromUnitVectors(_up, _dir);
+                boneMeshes[i].visible = true;
+            }
+
+            document.getElementById("loading").style.display = "none";
+        }
+
+        // ══ SMPL-X EDITOR MODE ════════════════════════════════════════════════
+        // Draggable joints. Displays TRUE SMPL-X metric coords (normalizePose is
+        // BYPASSED) so dragged world positions can be emitted verbatim as IK
+        // targets. Edits map back to body_pose on the Python side.
+        const raycaster = new THREE.Raycaster();
+        const pointer = new THREE.Vector2();
+        let tcontrols = null;          // TransformControls (lazy)
+        let jointSpheres = [];         // handles, SPARSE by SMPL-X joint idx (0-54)
+        let pickableSpheres = [];      // dense list of created spheres (for raycast)
+        let editorBones = [];          // cylinders for editor limbs
+        let editorLimbs = [];          // [child, parent] pairs (SMPL-X joint idx)
+        let childrenMap = {};          // parentIdx -> [childIdx,...] (built from limbs)
+        let editorActive = false;
+        let bodyMesh = null;              // SMPL-X surface mesh
+        const movedTargets = new Map();   // directly-dragged jointIdx -> [x,y,z]
+        let dragBase = null;              // {start, desc:[{c,pos}]} captured at drag start
+        // Live soft-skinning state: base (undeformed) verts + per-vertex skin
+        // (top-k jointIdx/weight in 0-54 space) + bind joint positions (all 55).
+        let meshBaseVerts = null;         // Float32Array (V*3), the served surface
+        let skinIndices = null;           // Int array (V*k), joint idx in 0-54
+        let skinWeights = null;           // Float array (V*k)
+        let skinK = 0;                    // weights per vertex
+        let bindJoints = null;            // [[x,y,z]...] all 55 joint rest positions
+
+        function setBodyMesh(vertices, faces) {
+            // (re)build the SMPL-X body surface. Semi-transparent so joint handles
+            // show through; double-sided; normals recomputed for lighting.
+            if (!vertices || !faces) return;
+            const pos = new Float32Array(vertices.length * 3);
+            for (let i = 0; i < vertices.length; i++) {
+                pos[i * 3] = vertices[i][0]; pos[i * 3 + 1] = vertices[i][1]; pos[i * 3 + 2] = vertices[i][2];
+            }
+            meshBaseVerts = pos.slice();       // keep an undeformed copy for skinning
+            const idx = new Uint32Array(faces.length * 3);
+            for (let i = 0; i < faces.length; i++) {
+                idx[i * 3] = faces[i][0]; idx[i * 3 + 1] = faces[i][1]; idx[i * 3 + 2] = faces[i][2];
+            }
+            if (!bodyMesh) {
+                const geo = new THREE.BufferGeometry();
+                geo.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+                geo.setIndex(new THREE.BufferAttribute(idx, 1));
+                const mat = new THREE.MeshPhongMaterial({
+                    color: 0xc7a98a, emissive: 0x1a1410, shininess: 8,
+                    transparent: true, opacity: 0.85, side: THREE.DoubleSide,
+                    flatShading: false,
+                });
+                bodyMesh = new THREE.Mesh(geo, mat);
+                scene.add(bodyMesh);
+            } else {
+                bodyMesh.geometry.setAttribute("position", new THREE.BufferAttribute(pos, 3));
+                bodyMesh.geometry.setIndex(new THREE.BufferAttribute(idx, 1));
+            }
+            bodyMesh.geometry.computeVertexNormals();
+            bodyMesh.geometry.attributes.position.needsUpdate = true;
+        }
+
+        const sphereGeo = new THREE.SphereGeometry(0.035, 16, 12);       // body handle
+        const fingerGeo = new THREE.SphereGeometry(0.012, 12, 8);        // finger handle
+        const matIdle = new THREE.MeshPhongMaterial({ color: 0xffffff, emissive: 0x222222 });
+        const matFinger = new THREE.MeshPhongMaterial({ color: 0x66ddff, emissive: 0x114455 });
+        const matMoved = new THREE.MeshPhongMaterial({ color: 0xffd24d, emissive: 0x5a4400, depthTest: false });
+
+        function ensureTransformControls() {
+            if (tcontrols) return;
+            tcontrols = new TransformControls(camera, renderer.domElement);
+            tcontrols.setSize(0.8);
+            scene.add(tcontrols);
+            // disable orbit while dragging the gizmo
+            tcontrols.addEventListener("dragging-changed", (e) => {
+                controls.enabled = !e.value;
+                if (e.value) beginDrag();           // capture descendants for rigid follow
+                else onDragRelease();               // mouse-up: emit targets
+            });
+            // live bone + skinned-mesh update as the joint (and descendants) move
+            tcontrols.addEventListener("objectChange", () => {
+                dragPropagate();
+                updateEditorBones();
+                applySkinning();
+            });
+        }
+
+        // Descendant joints (down the kinematic tree from `idx`) that have handles.
+        function descendantsOf(idx) {
+            const out = [], stack = [...(childrenMap[idx] || [])];
+            while (stack.length) {
+                const c = stack.pop();
+                if (jointSpheres[c]) out.push(c);
+                for (const g of (childrenMap[c] || [])) stack.push(g);
+            }
+            return out;
+        }
+        // On drag start, snapshot the dragged joint + its descendants so the whole
+        // sub-chain rides along rigidly (a wrist drag carries the fingers, etc.).
+        function beginDrag() {
+            const s = tcontrols.object;
+            if (!s) { dragBase = null; return; }
+            dragBase = {
+                start: s.position.clone(),
+                desc: descendantsOf(s.userData.jointIdx)
+                          .map(c => ({ c, pos: jointSpheres[c].position.clone() })),
+            };
+        }
+        function dragPropagate() {
+            if (!dragBase || !tcontrols.object) return;
+            const d = tcontrols.object.position.clone().sub(dragBase.start);
+            for (const { c, pos } of dragBase.desc) jointSpheres[c].position.copy(pos).add(d);
+        }
+
+        function setPoseEditor(pose3d) {
+            editorActive = true;
+            editorLimbs = pose3d.limbs || [];
+            const J = pose3d.joints_3d;            // TRUE metric, all 55 joints
+            const editable = pose3d.editable || J.map((_, i) => i);
+            movedTargets.clear();
+            bindJoints = J.map(p => [p[0], p[1], p[2]]);   // rest pose for skinning
+
+            // children map (parent -> children) for rigid descendant-follow on drag
+            childrenMap = {};
+            for (const [c, p] of editorLimbs) (childrenMap[p] = childrenMap[p] || []).push(c);
+
+            // body mesh (under the handles)
+            setBodyMesh(pose3d.vertices, pose3d.faces);
+
+            // skin weights (top-k jointIdx/weight per vertex, idx in 0-54), flattened
+            if (pose3d.skin && pose3d.skin.indices && pose3d.skin.weights) {
+                const si = pose3d.skin.indices, sw = pose3d.skin.weights;
+                skinK = si[0] ? si[0].length : 0;
+                skinIndices = new Int32Array(si.length * skinK);
+                skinWeights = new Float32Array(sw.length * skinK);
+                for (let v = 0; v < si.length; v++) {
+                    for (let k = 0; k < skinK; k++) {
+                        skinIndices[v * skinK + k] = si[v][k];
+                        skinWeights[v * skinK + k] = sw[v][k];
+                    }
+                }
+            } else {
+                skinIndices = skinWeights = null; skinK = 0;
+            }
+
+            // spheres — SPARSE array keyed by SMPL-X joint idx; only editable joints
+            // get a handle. Finger joints (idx>=25) are smaller + cyan.
+            pickableSpheres.forEach(s => scene.remove(s));
+            jointSpheres = []; pickableSpheres = [];
+            for (const i of editable) {
+                const p = J[i];
+                if (!p) continue;
+                const finger = i >= 25;
+                const s = new THREE.Mesh(finger ? fingerGeo : sphereGeo,
+                                         (finger ? matFinger : matIdle).clone());
+                s.material.depthTest = false;      // always visible over the mesh
+                s.position.set(p[0], p[1], p[2]);
+                s.userData.jointIdx = i;
+                s.renderOrder = 2;
+                scene.add(s);
+                jointSpheres[i] = s;
+                pickableSpheres.push(s);
+            }
+            // bones
+            editorBones.forEach(b => scene.remove(b));
+            editorBones = editorLimbs.map(() => {
+                const m = new THREE.Mesh(boneGeo, new THREE.MeshPhongMaterial({
+                    color: 0x00aaff, emissive: 0x003355, shininess: 30,
+                }));
+                scene.add(m);
+                return m;
+            });
+            updateEditorBones();
+
+            // fit camera to the true-metric body
+            const box = new THREE.Box3();
+            J.forEach(p => box.expandByPoint(new THREE.Vector3(...p)));
+            const center = box.getCenter(new THREE.Vector3());
+            const size = box.getSize(new THREE.Vector3());
+            const dist = Math.max(size.x, size.y, size.z, 0.8) * 2.4;
+            camera.position.set(center.x + dist, center.y + dist * 0.5, center.z + dist);
+            controls.target.copy(center);
+            controls.minDistance = 0.2;
+            controls.maxDistance = Math.max(12, dist * 4);
+            controls.update();
+            // hide the read-only H36M bones if any were shown
+            boneMeshes.forEach(b => (b.visible = false));
+            document.getElementById("loading").style.display = "none";
+            sendCamera();          // seed the node's camera widget with this view
+        }
+
+        // Live weight-blended soft-skinning: each vertex follows the joints it is
+        // weighted to. v = base + Σ_k w_k * (joint_now[idx_k] - joint_bind[idx_k]).
+        // A fast linear preview of the skinned surface; the server IK re-solve is
+        // still the authoritative deformation pushed back on re-queue.
+        function applySkinning() {
+            if (!bodyMesh || !meshBaseVerts || !skinIndices || !bindJoints) return;
+            // per-joint displacement = current handle position - bind, for every
+            // editable joint (covers dragged + rigidly-propagated descendants + live).
+            const nJ = bindJoints.length;
+            const dx = new Float32Array(nJ), dy = new Float32Array(nJ), dz = new Float32Array(nJ);
+            for (let j = 0; j < nJ; j++) {
+                const s = jointSpheres[j];
+                if (!s) continue;
+                dx[j] = s.position.x - bindJoints[j][0];
+                dy[j] = s.position.y - bindJoints[j][1];
+                dz[j] = s.position.z - bindJoints[j][2];
+            }
+            const attr = bodyMesh.geometry.attributes.position;
+            const out = attr.array;
+            const V = meshBaseVerts.length / 3;
+            for (let v = 0; v < V; v++) {
+                let ox = 0, oy = 0, oz = 0;
+                const b = v * skinK;
+                for (let k = 0; k < skinK; k++) {
+                    const j = skinIndices[b + k], w = skinWeights[b + k];
+                    ox += w * dx[j]; oy += w * dy[j]; oz += w * dz[j];
+                }
+                const t = v * 3;
+                out[t]     = meshBaseVerts[t]     + ox;
+                out[t + 1] = meshBaseVerts[t + 1] + oy;
+                out[t + 2] = meshBaseVerts[t + 2] + oz;
+            }
+            attr.needsUpdate = true;
+            bodyMesh.geometry.computeVertexNormals();
+        }
+
+        function updateEditorBones() {
+            for (let i = 0; i < editorLimbs.length; i++) {
+                const [ic, ip] = editorLimbs[i];
+                if (!jointSpheres[ic] || !jointSpheres[ip]) continue;
+                _a.copy(jointSpheres[ic].position);
+                _b.copy(jointSpheres[ip].position);
+                _mid.addVectors(_a, _b).multiplyScalar(0.5);
+                _dir.subVectors(_b, _a);
+                const len = Math.max(_dir.length(), 1e-5);
+                _dir.normalize();
+                editorBones[i].position.copy(_mid);
+                editorBones[i].scale.set(1, len, 1);
+                editorBones[i].quaternion.setFromUnitVectors(_up, _dir);
+            }
+        }
+
+        function onPointerDown(ev) {
+            if (!editorActive) return;
+            if (tcontrols && tcontrols.dragging) return;    // gizmo busy
+            const r = renderer.domElement.getBoundingClientRect();
+            pointer.x = ((ev.clientX - r.left) / r.width) * 2 - 1;
+            pointer.y = -((ev.clientY - r.top) / r.height) * 2 + 1;
+            raycaster.setFromCamera(pointer, camera);
+            const hits = raycaster.intersectObjects(pickableSpheres, false);
+            if (hits.length) {
+                ensureTransformControls();
+                tcontrols.attach(hits[0].object);
+            }
+        }
+
+        function onDragRelease() {
+            const s = tcontrols.object;
+            dragBase = null;
+            if (!s) return;
+            const i = s.userData.jointIdx;
+            s.material = matMoved;                          // mark edited
+            movedTargets.set(i, [s.position.x, s.position.y, s.position.z]);
+            const corrections = {};
+            for (const [idx, xyz] of movedTargets) corrections[String(idx)] = xyz;
+            window.parent.postMessage({ type: "POSE3D_CORRECTIONS", corrections }, "*");
+        }
+
+        renderer.domElement.addEventListener("pointerdown", onPointerDown);
+
+        // ── Camera sync ───────────────────────────────────────────────────────
+        // Emit the editor camera (world-space eye/at/up + fov) so the node can
+        // render the output maps from this exact viewpoint. Sent whenever the user
+        // stops orbiting/zooming, and once after a pose loads.
+        function sendCamera() {
+            if (!editorActive) return;
+            window.parent.postMessage({
+                type: "POSE3D_CAMERA",
+                camera: {
+                    eye: [camera.position.x, camera.position.y, camera.position.z],
+                    at: [controls.target.x, controls.target.y, controls.target.z],
+                    up: [camera.up.x, camera.up.y, camera.up.z],
+                    fov: camera.fov,
+                },
+            }, "*");
+        }
+        controls.addEventListener("end", sendCamera);
+        renderer.domElement.addEventListener("wheel", () => { if (editorActive) sendCamera(); }, { passive: true });
+
+        // ── Message API ───────────────────────────────────────────────────────
+        window.addEventListener("message", ({ data }) => {
+            if (!data) return;
+            if (data.type === "loadPose3D" && Array.isArray(data.pose3d?.joints_3d)) {
+                if (data.pose3d.editorMode) setPoseEditor(data.pose3d);
+                else setPose(data.pose3d.joints_3d);
+            }
+        });
+
+        // ── Resize ────────────────────────────────────────────────────────────
+        window.addEventListener("resize", () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+
+        // ── Render loop ───────────────────────────────────────────────────────
+        (function animate() {
+            requestAnimationFrame(animate);
+            controls.update();
+            renderer.render(scene, camera);
+        })();
+
+        // Signal parent that viewer is ready
+        window.parent.postMessage({ type: "VIEWER_READY" }, "*");
+    </script>
+</body>
+</html>

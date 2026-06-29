@@ -1,17 +1,21 @@
-#  Edit the following fields to match your project
-
 [project]
-name = "comfyui-customnodes-template"
-description = "Template repository for custom nodes from [ComfyUI-CustomNodes-Template](https://github.com/jhj0517/ComfyUI-CustomNodes-Template)."
+name = "comfyui-editpose"
 version = "1.0.0"
-license = {file = "LICENSE"}
-dependencies = ["",]  # e.g.) ["numpy==1.18.1", ]
+description = "Single-image motion capture for ComfyUI with ClickPose, MotionAGFormer, and an interactive 3D pose editor."
+license = { file = "LICENSE" }
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "opencv-python",
+    "scipy",
+    "torch",
+    "torchvision",
+]
 
 [project.urls]
-Repository = "https://github.com/jhj0517/ComfyUI-CustomNodes-Template"
-#  Used by Comfy Registry https://comfyregistry.org
+Repository = "https://github.com/ameliacode/comfyui-mocap"
 
 [tool.comfy]
-PublisherId = "jhj0517"
-DisplayName = "ComfyUI-CustomNodes-Template"
+PublisherId = "ameliacode"
+DisplayName = "EditPose"
 Icon = ""

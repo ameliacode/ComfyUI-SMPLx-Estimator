@@ -1,0 +1,20 @@
+# comfy-env-root.toml - dependency config for this custom node.
+
+[cuda]
+packages = []
+
+[apt]
+packages = []
+
+[dependencies]
+
+[pypi-dependencies]
+numpy = "*"
+opencv-python = "*"
+scipy = "*"
+torch = "*"
+torchvision = "*"
+
+[env_vars]
+
+[node_reqs]

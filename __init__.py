@@ -5,6 +5,7 @@ from .nodes import NODE_CLASS_MAPPINGS, NODE_CLASSES
 WEB_DIRECTORY = "./js"
 
 NODE_DISPLAY_NAME_MAPPINGS = {
+    "LoadSMPLX": "Load SMPLx",
     "LoadNLF": "Load NLF",
     "LoadMultiHMR": "Load Multi-HMR",
     "LoadWiLoR": "Load WiLoR",

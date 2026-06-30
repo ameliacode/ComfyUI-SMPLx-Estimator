@@ -66,13 +66,84 @@ def _oom_fallback(dev, fn):
         return fn("cpu")
 
 
+def _hf_download_smplx(repo_id, gender):
+    """Download a SMPL-X repo from HuggingFace into models/smplx/ (snapshot_download,
+    like ComfyUI-SAM3DBody) and return the parent dir so load_smplx finds
+    parent/smplx/SMPLX_<GENDER>.npz. Normalizes layout + skips if already present."""
+    import glob
+    import shutil
+    parent = os.path.join(folder_paths.models_dir, "smplx")
+    dest_smplx = os.path.join(parent, "smplx")
+    fname = f"SMPLX_{gender.upper()}.npz"
+    target = os.path.join(dest_smplx, fname)
+    if os.path.isfile(target):                      # already downloaded
+        return parent
+
+    try:
+        from huggingface_hub import snapshot_download
+        os.makedirs(parent, exist_ok=True)
+        print(f"[Load SMPLx] downloading {repo_id} from HuggingFace -> {parent}")
+        snapshot_download(repo_id=repo_id, local_dir=parent,
+                          allow_patterns=["*.npz", "*.pkl", "smplx/*", "SMPLX/*", "**/SMPLX_*"])
+    except Exception as e:
+        raise RuntimeError(
+            f"[Load SMPLx] HuggingFace download from {repo_id!r} failed: {e}\n"
+            f"Manually place {fname} at {dest_smplx}/ (e.g. from "
+            f"https://huggingface.co/{repo_id} or https://smpl-x.is.tue.mpg.de/)."
+        ) from e
+
+    if os.path.isfile(target):
+        return parent
+    # repo layout varies — locate the npz and normalize it into parent/smplx/
+    matches = glob.glob(os.path.join(parent, "**", fname), recursive=True)
+    if not matches:
+        raise FileNotFoundError(
+            f"[Load SMPLx] {fname} not found in HF repo {repo_id!r} after download.")
+    os.makedirs(dest_smplx, exist_ok=True)
+    if os.path.abspath(matches[0]) != os.path.abspath(target):
+        shutil.copy(matches[0], target)
+    return parent
+
+
+class LoadSMPLX:
+    """Load the SMPL-X body model (local folder or HuggingFace) -> SMPLX_MODEL,
+    shared by the estimators (NLF/Multi-HMR) and the editor."""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "model_source": (["local", "huggingface"],),
+            "gender": (_GENDERS,),
+            "local_path": ("STRING", {"default": DEFAULT_SMPLX_PARENT,
+                                      "tooltip": "Folder containing smplx/SMPLX_<GENDER>.npz "
+                                                 "(used when model_source=local)."}),
+            "hf_repo": ("STRING", {"default": "",
+                                   "tooltip": "HuggingFace repo id hosting the SMPL-X .npz "
+                                              "(used when model_source=huggingface)."}),
+        }}
+
+    RETURN_TYPES = ("SMPLX_MODEL",)
+    RETURN_NAMES = ("smplx_model",)
+    FUNCTION = "load"
+    CATEGORY = "editpose/loaders"
+
+    def load(self, model_source, gender, local_path, hf_repo):
+        if model_source == "huggingface":
+            if not hf_repo.strip():
+                raise ValueError("model_source=huggingface but hf_repo is empty — enter a repo id.")
+            parent = _hf_download_smplx(hf_repo.strip(), gender)
+        else:
+            parent = os.path.expanduser(local_path)
+        _check_smplx(parent, gender)
+        return ({"model_path": parent, "gender": gender},)
+
+
 class LoadNLF:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
             "model": (_list("nlf"),),
-            "smplx_model_path": ("STRING", {"default": DEFAULT_SMPLX_PARENT}),
-            "gender": (_GENDERS,),
+            "smplx_model": ("SMPLX_MODEL",),
             "device": (_DEVICES,),
         }}
 
@@ -81,12 +152,11 @@ class LoadNLF:
     FUNCTION = "load"
     CATEGORY = "editpose/loaders"
 
-    def load(self, model, smplx_model_path, gender, device):
+    def load(self, model, smplx_model, device):
         dev = resolve_device(device)
-        _check_smplx(smplx_model_path, gender)
         net = load_nlf(_resolve("nlf", model), dev)
-        return ({"model": net, "smplx_parent": smplx_model_path,
-                 "gender": gender, "device": dev},)
+        return ({"model": net, "smplx_parent": smplx_model["model_path"],
+                 "gender": smplx_model["gender"], "device": dev},)
 
 
 class LoadMultiHMR:
@@ -94,8 +164,7 @@ class LoadMultiHMR:
     def INPUT_TYPES(cls):
         return {"required": {
             "model": (_list("multihmr"),),
-            "smplx_model_path": ("STRING", {"default": DEFAULT_SMPLX_PARENT}),
-            "gender": (_GENDERS,),
+            "smplx_model": ("SMPLX_MODEL",),
             "device": (_DEVICES,),
         }}
 
@@ -104,13 +173,13 @@ class LoadMultiHMR:
     FUNCTION = "load"
     CATEGORY = "editpose/loaders"
 
-    def load(self, model, smplx_model_path, gender, device):
-        _check_smplx(smplx_model_path, gender)
+    def load(self, model, smplx_model, device):
         ckpt = _resolve("multihmr", model)
+        parent, gender = smplx_model["model_path"], smplx_model["gender"]
 
         def _do(dev):
-            model, img_size = load_multihmr(ckpt, smplx_model_path, dev)
-            return ({"model": model, "img_size": img_size, "smplx_parent": smplx_model_path,
+            net, img_size = load_multihmr(ckpt, parent, dev)
+            return ({"model": net, "img_size": img_size, "smplx_parent": parent,
                      "gender": gender, "device": dev},)
         return _oom_fallback(resolve_device(device), _do)
 

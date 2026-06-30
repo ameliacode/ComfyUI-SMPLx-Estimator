@@ -10,19 +10,20 @@ function getWidget(node, name) {
 // ── embedded three.js SMPL-X editor (iframe viewer) ───────────────────────────────
 
 function createEmbeddedNativePose3DEditor(node) {
-    const VIEWER_HEIGHT = 600;
-    const NODE_MIN_WIDTH = 400;
-    const NODE_CHROME_HEIGHT = 140;
-    const NODE_MIN_HEIGHT = VIEWER_HEIGHT + NODE_CHROME_HEIGHT;
+    const DEFAULT_VIEWER_HEIGHT = 380;
+    const MIN_VIEWER_HEIGHT = 260;
+    const NODE_MIN_WIDTH = 320;
+    const NODE_CHROME_HEIGHT = 130;
+    const NODE_MIN_HEIGHT = MIN_VIEWER_HEIGHT + NODE_CHROME_HEIGHT;
+    let viewerHeight = DEFAULT_VIEWER_HEIGHT;   // tracks node resize
 
     const viewerUrl = getViewerUrl("viewer_pose3d");
 
     const container = document.createElement("div");
     Object.assign(container.style, {
         width: "100%",
-        height: `${VIEWER_HEIGHT}px`,
-        minHeight: `${VIEWER_HEIGHT}px`,
-        maxHeight: `${VIEWER_HEIGHT}px`,
+        height: `${DEFAULT_VIEWER_HEIGHT}px`,
+        minHeight: `${MIN_VIEWER_HEIGHT}px`,
         flex: "0 0 auto",
         position: "relative",
         overflow: "hidden",
@@ -93,24 +94,25 @@ function createEmbeddedNativePose3DEditor(node) {
 
     widget.computeSize = function (width) {
         const w = Math.max(width || NODE_MIN_WIDTH, NODE_MIN_WIDTH);
-        return [w, VIEWER_HEIGHT];
+        return [w, viewerHeight];
     };
     widget.element = container;
 
     if (typeof node.setSize === "function") {
         node.setSize([
             Math.max(node.size?.[0] ?? 0, NODE_MIN_WIDTH),
-            Math.max(node.size?.[1] ?? 0, NODE_MIN_HEIGHT),
+            Math.max(node.size?.[1] ?? 0, DEFAULT_VIEWER_HEIGHT + NODE_CHROME_HEIGHT),
         ]);
     }
 
     const originalOnResize = node.onResize?.bind(node);
     node.onResize = function (size) {
         originalOnResize?.(size);
-        if (size?.[1] && size[1] < NODE_MIN_HEIGHT && typeof node.setSize === "function") {
-            node.setSize([Math.max(size[0] ?? NODE_MIN_WIDTH, NODE_MIN_WIDTH), NODE_MIN_HEIGHT]);
-        }
-        container.style.height = `${VIEWER_HEIGHT}px`;
+        // viewer fills the node (minus the widgets/chrome above), down to a sane min,
+        // so dragging the node resizes the 3D view instead of locking it at one height.
+        const total = size?.[1] ?? NODE_MIN_HEIGHT;
+        viewerHeight = Math.max(total - NODE_CHROME_HEIGHT, MIN_VIEWER_HEIGHT);
+        container.style.height = `${viewerHeight}px`;
     };
 
     widget.setPoseData = (pose3dData) => {

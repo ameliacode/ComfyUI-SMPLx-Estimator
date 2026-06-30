@@ -12,13 +12,13 @@
             width: 100%;
             height: 100vh;
             display: flex;
-            flex-direction: column;
+            flex-direction: row;   /* viewer | controls sidebar — full height each */
         }
         #viewerContainer {
             position: relative;
             flex: 1 1 auto;
-            min-height: 0;
-            width: 100%;
+            min-width: 0;
+            height: 100%;
         }
         #canvas {
             width: 100%;
@@ -36,25 +36,19 @@
             z-index: 10;
         }
         #controls {
-            flex: 0 0 auto;            /* sits below the viewer — never overlaps it */
+            flex: 0 0 148px;           /* full-height sidebar — beside the viewer, never over it */
+            height: 100%;
             background: rgba(26, 26, 26, 0.95);
-            border-top: 1px solid #444;
-            padding: 5px 8px;
+            border-left: 1px solid #444;
+            padding: 8px;
             color: #ddd;
-            font-size: 10px;
+            font-size: 11px;
             display: flex;
-            flex-flow: row wrap;       /* all controls flow into one wrapping row */
-            align-items: center;
-            gap: 4px 10px;
-            max-height: 35%;
+            flex-direction: column;
+            gap: 8px;
             overflow-y: auto;
             box-sizing: border-box;
         }
-        #controls > div:has(strong) { display: none; }   /* hide redundant title (node already labeled) */
-        .control-group { display: contents; }            /* let buttons/checkboxes flow into the row */
-        #controls button { padding: 3px 8px; font-size: 10px; }
-        .checkbox-label { padding: 0; gap: 5px; }
-        #status { flex: 1 0 100%; margin: 2px 0 0; color: #888; }
         #controls button {
             background: #4a4a4a;
             color: white;

@@ -201,8 +201,8 @@ class SMPLXEditor:
             },
         }
 
-    RETURN_TYPES = ("SMPLX", "IMAGE", "IMAGE", "IMAGE", "IMAGE")
-    RETURN_NAMES = ("smplx", "pose", "depth", "normal", "canny")
+    RETURN_TYPES = ("MESH_DATA", "IMAGE", "IMAGE", "IMAGE", "IMAGE")
+    RETURN_NAMES = ("mesh_data", "pose", "depth", "normal", "canny")
     OUTPUT_NODE = True
     FUNCTION = "edit"
     CATEGORY = "editpose"
@@ -261,7 +261,12 @@ class SMPLXEditor:
                                                  ground=False, camera=cam)
         payload = _smplx_payload(out, editable_limbs(parents), verts, faces, skin,
                                  editable=EDITABLE_JOINTS)
+        mesh_data = {
+            "vertices": np.asarray(verts, np.float32),
+            "faces": np.asarray(faces, np.int64),
+            "gender": out.get("gender", "neutral"),
+        }
         return {
             "ui": {"smplx_json": [payload]},
-            "result": (out, _img(pose), _img(depth), _img(normal), _img(canny)),
+            "result": (mesh_data, _img(pose), _img(depth), _img(normal), _img(canny)),
         }

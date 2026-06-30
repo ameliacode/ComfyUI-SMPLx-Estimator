@@ -3,6 +3,7 @@ from .nlf_nodes import NLFSMPLXEstimator
 from .multihmr_nodes import MultiHMREstimator
 from .wilor_nodes import WiLoRHandEstimator
 from .smplx_nodes import SMPLXEditor
+from .export_nodes import ExportMesh
 
 NODE_CLASSES = [
     LoadNLF, LoadMultiHMR, LoadWiLoR,
@@ -10,6 +11,7 @@ NODE_CLASSES = [
     MultiHMREstimator,
     WiLoRHandEstimator,
     SMPLXEditor,
+    ExportMesh,
 ]
 
 NODE_CLASS_MAPPINGS = {
@@ -20,4 +22,5 @@ NODE_CLASS_MAPPINGS = {
     "MultiHMREstimator": MultiHMREstimator,
     "WiLoRHandEstimator": WiLoRHandEstimator,
     "SMPLXEditor": SMPLXEditor,
+    "ExportMesh": ExportMesh,
 }

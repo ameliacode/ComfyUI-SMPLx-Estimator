@@ -12,6 +12,7 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "MultiHMREstimator": "Full Body: Multi-HMR",
     "WiLoRHandEstimator": "Hand: WiLoR",
     "SMPLXEditor": "SMPL-X Editor",
+    "ExportMesh": "Export Mesh",
 }
 
 __all__ = [

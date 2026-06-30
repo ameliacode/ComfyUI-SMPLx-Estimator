@@ -178,8 +178,8 @@ class LoadSMPLX:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "model_source": (["local", "huggingface"],),
-            "gender": (_GENDERS,),
+            "model_source": (["local", "huggingface"], {"default": "local"}),
+            "gender": (_GENDERS, {"default": "neutral"}),
             "model_path": ("STRING", {"default": DEFAULT_SMPLX_PARENT,
                                       "tooltip": "SMPL-X folder (default: ComfyUI/models/smplx/ "
                                                  "with SMPLX_<GENDER>.npz). model_source=local."}),
@@ -204,11 +204,11 @@ class LoadNLF:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "model_source": (["local", "huggingface"],),
+            "model_source": (["local", "huggingface"], {"default": "local"}),
             "model_path": ("STRING", {"default": _local_dir("nlf"), "tooltip": _PATH_TIP}),
             "hf_token": ("STRING", {"default": "", "tooltip": "HuggingFace access token."}),
             "smplx_model": ("SMPLX_MODEL",),
-            "device": (_DEVICES,),
+            "device": (_DEVICES, {"default": "auto"}),
         }}
 
     RETURN_TYPES = ("NLF_MODEL",)
@@ -231,11 +231,11 @@ class LoadMultiHMR:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "model_source": (["local", "huggingface"],),
+            "model_source": (["local", "huggingface"], {"default": "local"}),
             "model_path": ("STRING", {"default": _local_dir("multihmr"), "tooltip": _PATH_TIP}),
             "hf_token": ("STRING", {"default": "", "tooltip": "HuggingFace access token."}),
             "smplx_model": ("SMPLX_MODEL",),
-            "device": (_DEVICES,),
+            "device": (_DEVICES, {"default": "auto"}),
         }}
 
     RETURN_TYPES = ("MULTIHMR_MODEL",)
@@ -262,10 +262,10 @@ class LoadWiLoR:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "model_source": (["local", "huggingface"],),
+            "model_source": (["local", "huggingface"], {"default": "local"}),
             "model_path": ("STRING", {"default": _local_dir("wilor"), "tooltip": _PATH_TIP}),
             "hf_token": ("STRING", {"default": "", "tooltip": "HuggingFace access token."}),
-            "device": (_DEVICES,),
+            "device": (_DEVICES, {"default": "auto"}),
         }}
 
     RETURN_TYPES = ("WILOR_MODEL",)

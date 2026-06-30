@@ -36,8 +36,7 @@
             z-index: 10;
         }
         #controls {
-            flex: 0 0 76px;            /* fixed-height bar below the square viewer */
-            height: 76px;
+            flex: 0 0 auto;            /* natural height — shows every control, no scroll */
             background: rgba(26, 26, 26, 0.95);
             border-top: 1px solid #444;
             padding: 6px 8px;
@@ -48,7 +47,7 @@
             align-content: flex-start;
             align-items: center;
             gap: 4px 10px;
-            overflow-y: auto;
+            overflow: visible;
             box-sizing: border-box;
         }
         #controls > div:has(strong) { display: none; }   /* node already labels it */
@@ -592,6 +591,15 @@
         window.addEventListener("resize", sizeRenderer);
         new ResizeObserver(sizeRenderer).observe(viewerContainer);
 
+        // Report the controls-bar height so the parent can size the iframe to fit it
+        // (keeps the 3D view square + the bar fully visible, no scroll).
+        const controlsEl = document.getElementById("controls");
+        const reportUiHeight = () => {
+            if (controlsEl) window.parent.postMessage(
+                { type: "POSE3D_UI_HEIGHT", height: controlsEl.offsetHeight }, "*");
+        };
+        if (controlsEl) new ResizeObserver(reportUiHeight).observe(controlsEl);
+
         // ── UI controls (comfy-3d-viewers FBX-viewer style) ────────────────────
         const $ = (id) => document.getElementById(id);
         const setStatus = (t) => { const s = $("status"); if (s) s.textContent = t; };
@@ -648,6 +656,7 @@
 
         // Signal parent that viewer is ready
         window.parent.postMessage({ type: "VIEWER_READY" }, "*");
+        reportUiHeight();
     </script>
 </body>
 </html>

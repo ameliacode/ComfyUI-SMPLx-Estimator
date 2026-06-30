@@ -11,10 +11,10 @@ function getWidget(node, name) {
 
 function createEmbeddedNativePose3DEditor(node) {
     const NODE_MIN_WIDTH = 420;
-    const CONTROLS_BAR = 76;          // MUST match #controls fixed height in viewer_pose3d.html
+    let uiBarHeight = 84;             // real controls-bar height, reported by the viewer
     const NODE_CHROME_HEIGHT = 130;   // node title + input widgets above the viewer
-    // iframe height = width + bar  ->  the 3D view above the bar is exactly square (w x w).
-    const iframeHeight = (w) => Math.max(w, NODE_MIN_WIDTH) + CONTROLS_BAR;
+    // iframe height = square viewer (w x w) + the controls bar below it.
+    const iframeHeight = (w) => Math.max(w, NODE_MIN_WIDTH) + uiBarHeight;
     const NODE_MIN_HEIGHT = iframeHeight(NODE_MIN_WIDTH) + NODE_CHROME_HEIGHT;
 
     const viewerUrl = getViewerUrl("viewer_pose3d");
@@ -81,6 +81,20 @@ function createEmbeddedNativePose3DEditor(node) {
             if (cameraWidget) {
                 cameraWidget.value = data.camera ? JSON.stringify(data.camera) : "";
                 app.graph.setDirtyCanvas(true, false);
+            }
+        } else if (data.type === "POSE3D_UI_HEIGHT") {
+            // Viewer reports its controls-bar height -> grow the iframe to fit it,
+            // keeping the 3D view square (w x w) above a fully-visible bar.
+            const h = Math.max(Number(data.height) || 0, 28);
+            if (Math.abs(h - uiBarHeight) > 1) {
+                uiBarHeight = h;
+                const w = Math.max(node.size?.[0] ?? NODE_MIN_WIDTH, NODE_MIN_WIDTH);
+                container.style.height = `${iframeHeight(w)}px`;
+                if (typeof node.computeSize === "function" && typeof node.setSize === "function") {
+                    const nat = node.computeSize();
+                    node.setSize([Math.max(node.size?.[0] ?? nat[0], NODE_MIN_WIDTH), nat[1]]);
+                }
+                app.graph?.setDirtyCanvas?.(true, true);
             }
         }
     };

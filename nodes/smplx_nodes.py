@@ -226,8 +226,30 @@ class SMPLXEditor:
                        left_grasp, right_grasp, betas, expression, jaw_open)).encode())
         return h.hexdigest()
 
+    @classmethod
+    def VALIDATE_INPUTS(cls, size=None, reik_iters=None, seed=None,
+                        left_grasp=None, right_grasp=None, jaw_open=None, **kwargs):
+        # Accept empty/stale widget values (e.g. '' left in a FLOAT slot by an older
+        # saved graph). edit() coerces them; this prevents a hard prompt-validation
+        # failure that would silently skip the node (blank viewer).
+        return True
+
     def edit(self, smplx, size, reik_iters, device, seed, corrections=None, camera=None,
              left_grasp=0.0, right_grasp=0.0, betas="", expression="", jaw_open=0.0):
+        # widget values from older saved graphs can be the wrong type ('' in a float
+        # slot, a number in a string slot) — coerce defensively.
+        def _f(v, d):
+            try:
+                return float(v)
+            except (TypeError, ValueError):
+                return d
+        size, reik_iters, seed = int(_f(size, 512)), int(_f(reik_iters, 80)), int(_f(seed, 0))
+        left_grasp, right_grasp, jaw_open = _f(left_grasp, 0.0), _f(right_grasp, 0.0), _f(jaw_open, 0.0)
+        corrections = corrections if isinstance(corrections, str) else ""
+        camera = camera if isinstance(camera, str) else ""
+        betas = betas if isinstance(betas, str) else (str(betas) if betas is not None else "")
+        expression = expression if isinstance(expression, str) else (str(expression) if expression is not None else "")
+
         dev = resolve_device(device)
         model = load_smplx(smplx["model_path"], smplx.get("gender", "neutral"), dev)
 

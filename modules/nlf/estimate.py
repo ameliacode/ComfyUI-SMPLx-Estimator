@@ -58,19 +58,25 @@ def load_nlf(model_path: str, device: str):
 def _pick_person(pred):
     """Choose the largest-box detection; return (pose72, betas10, trans3, box4) numpy.
     box4 = [x0,y0,x1,y1] in image pixels."""
-    boxes = pred["boxes"][0]            # (N,5) x0,y0,x1,y1,conf
-    pose = pred["pose"][0]              # (N,72)
-    betas = pred["betas"][0]            # (N,10)
-    trans = pred["trans"][0]            # (N,3)
-    if pose.shape[0] == 0:
-        raise RuntimeError("NLF detected no person in the image.")
-    if pose.shape[0] == 1:
+    # When NLF detects nobody it may omit keys entirely -> treat as "no person".
+    pose_l = pred.get("pose")
+    if not pose_l or pose_l[0].shape[0] == 0:
+        raise RuntimeError(
+            "NLF detected no person in the image. Try a clearer / more centered photo, "
+            "or use 'Full Body: Multi-HMR'."
+        )
+    pose = pose_l[0]              # (N,72)
+    betas = pred["betas"][0]     # (N,10)
+    trans = pred["trans"][0]     # (N,3)
+    boxes = pred["boxes"][0] if "boxes" in pred else None
+    if pose.shape[0] == 1 or boxes is None:
         i = 0
     else:
         b = boxes.detach().cpu().numpy()
         areas = (b[:, 2] - b[:, 0]) * (b[:, 3] - b[:, 1])
         i = int(np.argmax(areas))
-    box = boxes[i, :4].detach().cpu().numpy().astype(np.float32)
+    box = (boxes[i, :4].detach().cpu().numpy().astype(np.float32)
+           if boxes is not None else np.zeros(4, np.float32))
     return (pose[i].detach().cpu().numpy().astype(np.float32),
             betas[i].detach().cpu().numpy().astype(np.float32),
             trans[i].detach().cpu().numpy().astype(np.float32),

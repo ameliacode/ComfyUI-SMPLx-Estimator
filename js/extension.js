@@ -100,7 +100,7 @@ function createEmbeddedNativePose3DEditor(node) {
     if (typeof node.setSize === "function") {
         node.setSize([
             Math.max(node.size?.[0] ?? 0, NODE_MIN_WIDTH),
-            Math.max(node.size?.[1] ?? 0, NODE_MIN_HEIGHT),
+            NODE_MIN_HEIGHT,   // don't preserve a bloated saved height
         ]);
     }
 
@@ -138,7 +138,16 @@ function createEmbeddedNativePose3DEditor(node) {
         window.removeEventListener("message", messageHandler);
     };
 
-    requestAnimationFrame(() => node.onResize?.(node.size));
+    // An earlier resize-feedback bug could bloat the node height and persist it into
+    // saved graphs. Force the node back to its natural compact size on load.
+    requestAnimationFrame(() => {
+        container.style.height = `${VIEWER_HEIGHT}px`;
+        if (typeof node.computeSize === "function" && typeof node.setSize === "function") {
+            const nat = node.computeSize();
+            node.setSize([Math.max(node.size?.[0] ?? nat[0], NODE_MIN_WIDTH), nat[1]]);
+        }
+        app.graph?.setDirtyCanvas?.(true, true);
+    });
     return widget;
 }
 

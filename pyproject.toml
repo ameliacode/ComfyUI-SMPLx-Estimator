@@ -1,7 +1,7 @@
 [project]
-name = "comfyui-editpose"
+name = "comfyui-smplx-estimator"
 version = "1.0.0"
-description = "Single-image motion capture for ComfyUI with ClickPose, MotionAGFormer, and an interactive 3D pose editor."
+description = "Single-image SMPL-X estimation for ComfyUI (NLF / Multi-HMR / WiLoR) with an interactive 3D SMPL-X editor and control-map / mesh export."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"
 dependencies = [
@@ -17,5 +17,5 @@ Repository = "https://github.com/ameliacode/comfyui-mocap"
 
 [tool.comfy]
 PublisherId = "ameliacode"
-DisplayName = "EditPose"
+DisplayName = "ComfyUI-SMPLx Estimator"
 Icon = ""

@@ -33,7 +33,7 @@ class WiLoRHandEstimator:
     RETURN_TYPES = ("SMPLX",)
     RETURN_NAMES = ("smplx_hands",)
     FUNCTION = "estimate"
-    CATEGORY = "editpose"
+    CATEGORY = "SMPLx Estimator"
 
     @classmethod
     def IS_CHANGED(cls, model, image, conf):

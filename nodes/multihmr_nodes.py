@@ -52,7 +52,7 @@ class MultiHMREstimator:
     RETURN_NAMES = ("smplx", "preview")
     OUTPUT_NODE = True
     FUNCTION = "estimate"
-    CATEGORY = "editpose"
+    CATEGORY = "SMPLx Estimator"
 
     @classmethod
     def IS_CHANGED(cls, model, image, det_thresh):

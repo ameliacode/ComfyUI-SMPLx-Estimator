@@ -205,7 +205,7 @@ class SMPLXEditor:
     RETURN_NAMES = ("mesh_data", "pose", "depth", "normal", "canny")
     OUTPUT_NODE = True
     FUNCTION = "edit"
-    CATEGORY = "editpose"
+    CATEGORY = "SMPLx Estimator"
 
     @classmethod
     def IS_CHANGED(cls, smplx, size, reik_iters, device, seed, corrections=None, camera=None,

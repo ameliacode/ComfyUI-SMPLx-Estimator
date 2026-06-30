@@ -169,7 +169,7 @@ function createEmbeddedNativePose3DEditor(node) {
 // ── ComfyUI extension: SMPL-X Editor ─────────────────────────────────────────────
 
 app.registerExtension({
-    name: "editpose.SMPLXEditor",
+    name: "smplx-estimator.SMPLXEditor",
 
     nodeCreated(node) {
         if (node.comfyClass !== "SMPLXEditor") return;

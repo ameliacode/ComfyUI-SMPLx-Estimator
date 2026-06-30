@@ -61,7 +61,7 @@ class ExportMesh:
     RETURN_TYPES = ("STRING",)
     RETURN_NAMES = ("file_path",)
     FUNCTION = "export"
-    CATEGORY = "editpose"
+    CATEGORY = "SMPLx Estimator"
     OUTPUT_NODE = True
 
     def export(self, mesh_data, filename_prefix, format):

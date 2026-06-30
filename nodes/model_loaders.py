@@ -188,7 +188,7 @@ class LoadSMPLX:
     RETURN_TYPES = ("SMPLX_MODEL",)
     RETURN_NAMES = ("smplx_model",)
     FUNCTION = "load"
-    CATEGORY = "editpose/loaders"
+    CATEGORY = "SMPLx Estimator/loaders"
 
     def load(self, model_source, gender, model_path, hf_token):
         parent = _resolve_smplx(self.REPO_ID, model_source, gender, model_path, hf_token)
@@ -212,7 +212,7 @@ class LoadNLF:
     RETURN_TYPES = ("NLF_MODEL",)
     RETURN_NAMES = ("model",)
     FUNCTION = "load"
-    CATEGORY = "editpose/loaders"
+    CATEGORY = "SMPLx Estimator/loaders"
 
     def load(self, model_source, model_path, hf_token, smplx_model, device):
         dev = resolve_device(device)
@@ -239,7 +239,7 @@ class LoadMultiHMR:
     RETURN_TYPES = ("MULTIHMR_MODEL",)
     RETURN_NAMES = ("model",)
     FUNCTION = "load"
-    CATEGORY = "editpose/loaders"
+    CATEGORY = "SMPLx Estimator/loaders"
 
     def load(self, model_source, model_path, hf_token, smplx_model, device):
         ckpt = _resolve_weight("multihmr", self.REPO_ID, model_source, model_path, hf_token, self.FILENAME)
@@ -269,7 +269,7 @@ class LoadWiLoR:
     RETURN_TYPES = ("WILOR_MODEL",)
     RETURN_NAMES = ("model",)
     FUNCTION = "load"
-    CATEGORY = "editpose/loaders"
+    CATEGORY = "SMPLx Estimator/loaders"
 
     def load(self, model_source, model_path, hf_token, device):
         ckpt = _resolve_weight("wilor", self.REPO_ID, model_source, model_path, hf_token, self.CKPT)

@@ -36,20 +36,25 @@
             z-index: 10;
         }
         #controls {
-            flex: 0 0 auto;
+            flex: 0 0 auto;            /* sits below the viewer — never overlaps it */
             background: rgba(26, 26, 26, 0.95);
             border-top: 1px solid #444;
             padding: 5px 8px;
-            color: white;
+            color: #ddd;
             font-size: 10px;
             display: flex;
-            flex-direction: column;
-            gap: 3px;
-            max-height: 28%;
+            flex-flow: row wrap;       /* all controls flow into one wrapping row */
+            align-items: center;
+            gap: 4px 10px;
+            max-height: 35%;
             overflow-y: auto;
+            box-sizing: border-box;
         }
-        #controls button { padding: 4px 8px !important; font-size: 10px !important; }
-        .checkbox-label { padding: 1px 0 !important; gap: 5px !important; }
+        #controls > div:has(strong) { display: none; }   /* hide redundant title (node already labeled) */
+        .control-group { display: contents; }            /* let buttons/checkboxes flow into the row */
+        #controls button { padding: 3px 8px; font-size: 10px; }
+        .checkbox-label { padding: 0; gap: 5px; }
+        #status { flex: 1 0 100%; margin: 2px 0 0; color: #888; }
         #controls button {
             background: #4a4a4a;
             color: white;

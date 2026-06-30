@@ -190,13 +190,7 @@ class SMPLXEditor:
                                       "tooltip": "Editor camera (set automatically as you "
                                                  "orbit the 3D view). Renders the output maps "
                                                  "from that viewpoint; empty = front view."}),
-                "left_grasp": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                         "tooltip": "Left-hand grasp OVERRIDE: 0 = keep "
-                                                    "estimated/dragged hand, 1 = closed fist."}),
-                "right_grasp": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                          "tooltip": "Right-hand grasp OVERRIDE: 0 = keep "
-                                                     "estimated/dragged hand, 1 = closed fist."}),
-                # ── direct SMPL-X parameter edits ──────────────────────────────
+                # ── direct SMPL-X parameter edits (strings tolerate empty/stale values) ──
                 "betas": ("STRING", {"default": "", "multiline": False,
                                      "tooltip": "Body shape: up to 10 comma-separated betas "
                                                 "(e.g. '1.5,-0.5'). Empty = keep fitted shape. "
@@ -204,8 +198,6 @@ class SMPLXEditor:
                 "expression": ("STRING", {"default": "", "multiline": False,
                                           "tooltip": "Facial expression: up to 10 comma-separated "
                                                      "coefficients. Empty = neutral."}),
-                "jaw_open": ("FLOAT", {"default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05,
-                                       "tooltip": "Mouth/jaw open, 0..1."}),
             },
         }
 
@@ -217,44 +209,22 @@ class SMPLXEditor:
 
     @classmethod
     def IS_CHANGED(cls, smplx, size, reik_iters, device, seed, corrections=None, camera=None,
-                   left_grasp=0.0, right_grasp=0.0, betas="", expression="", jaw_open=0.0):
+                   betas="", expression=""):
         h = hashlib.sha256()
         for k in ("global_orient", "body_pose", "betas", "transl",
                   "left_hand_pose", "right_hand_pose"):
             h.update(np.asarray(smplx[k], np.float32).tobytes())
         h.update(repr((size, reik_iters, device, seed, corrections or "", camera or "",
-                       left_grasp, right_grasp, betas, expression, jaw_open)).encode())
+                       betas, expression)).encode())
         return h.hexdigest()
 
-    @classmethod
-    def VALIDATE_INPUTS(cls, size=None, reik_iters=None, seed=None,
-                        left_grasp=None, right_grasp=None, jaw_open=None, **kwargs):
-        # Accept empty/stale widget values (e.g. '' left in a FLOAT slot by an older
-        # saved graph). edit() coerces them; this prevents a hard prompt-validation
-        # failure that would silently skip the node (blank viewer).
-        return True
-
     def edit(self, smplx, size, reik_iters, device, seed, corrections=None, camera=None,
-             left_grasp=0.0, right_grasp=0.0, betas="", expression="", jaw_open=0.0):
-        # widget values from older saved graphs can be the wrong type ('' in a float
-        # slot, a number in a string slot) — coerce defensively.
-        def _f(v, d):
-            try:
-                return float(v)
-            except (TypeError, ValueError):
-                return d
-        size, reik_iters, seed = int(_f(size, 512)), int(_f(reik_iters, 80)), int(_f(seed, 0))
-        left_grasp, right_grasp, jaw_open = _f(left_grasp, 0.0), _f(right_grasp, 0.0), _f(jaw_open, 0.0)
-        corrections = corrections if isinstance(corrections, str) else ""
-        camera = camera if isinstance(camera, str) else ""
-        betas = betas if isinstance(betas, str) else (str(betas) if betas is not None else "")
-        expression = expression if isinstance(expression, str) else (str(expression) if expression is not None else "")
-
+             betas="", expression=""):
         dev = resolve_device(device)
         model = load_smplx(smplx["model_path"], smplx.get("gender", "neutral"), dev)
 
         # 1) direct parameter edits first (shape/expression) so IK uses them
-        out = _apply_params(smplx, betas=betas, expression=expression, jaw_open=jaw_open)
+        out = _apply_params(smplx, betas=betas, expression=expression)
 
         # 2) joint drags -> body_pose (idx 0-21) and/or hand_pose (idx 25-54) IK
         if corrections and corrections.strip():
@@ -281,7 +251,6 @@ class SMPLXEditor:
             except json.JSONDecodeError:
                 pass
 
-        out = _apply_grasp(out, model, left_grasp, right_grasp)   # hand override (0..1)
         verts, faces, joints = _forward_mesh(out, model, dev)
         out["joints_3d"] = joints                             # handles match the mesh
         out, verts = _ground(out, verts)                      # feet on the floor

@@ -66,6 +66,33 @@ def _oom_fallback(dev, fn):
         return fn("cpu")
 
 
+def _comfy_tqdm():
+    """tqdm subclass that mirrors HuggingFace download progress into ComfyUI's
+    progress bar (ComfyUI-SAM3DBody style)."""
+    try:
+        import comfy.utils
+        import tqdm as _tqdm_mod
+    except ImportError:
+        return None
+    holder = {"pbar": None, "total": 0, "done": 0}
+
+    class _T(_tqdm_mod.tqdm):
+        def __init__(self, *a, **kw):
+            super().__init__(*a, **kw)
+            if self.total and self.total > 0 and holder["pbar"] is None:
+                holder["total"] = self.total
+                holder["done"] = 0
+                holder["pbar"] = comfy.utils.ProgressBar(self.total)
+
+        def update(self, n=1):
+            ret = super().update(n)
+            if n and holder["pbar"] and holder["total"] > 0:
+                holder["done"] = min(holder["done"] + n, holder["total"])
+                holder["pbar"].update_absolute(holder["done"], holder["total"])
+            return ret
+    return _T
+
+
 def _hf_download_smplx(repo_id, gender):
     """Download a SMPL-X repo from HuggingFace into models/smplx/ (snapshot_download,
     like ComfyUI-SAM3DBody) and return the parent dir so load_smplx finds
@@ -83,8 +110,13 @@ def _hf_download_smplx(repo_id, gender):
         from huggingface_hub import snapshot_download
         os.makedirs(parent, exist_ok=True)
         print(f"[Load SMPLx] downloading {repo_id} from HuggingFace -> {parent}")
+        kw = {}
+        tq = _comfy_tqdm()           # show download progress in ComfyUI's UI
+        if tq is not None:
+            kw["tqdm_class"] = tq
         snapshot_download(repo_id=repo_id, local_dir=parent,
-                          allow_patterns=["*.npz", "*.pkl", "smplx/*", "SMPLX/*", "**/SMPLX_*"])
+                          allow_patterns=["*.npz", "*.pkl", "smplx/*", "SMPLX/*", "**/SMPLX_*"],
+                          **kw)
     except Exception as e:
         raise RuntimeError(
             f"[Load SMPLx] HuggingFace download from {repo_id!r} failed: {e}\n"

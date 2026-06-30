@@ -79,13 +79,10 @@ if [ "$DO_START" -eq 1 ]; then
 
   cd "$COMFY_DIR" || fail "ComfyUI dir not found: $COMFY_DIR"
   : > "$LOG"   # truncate so we only read this run's output
-  # Pick the GPU with the most free memory (this box's GPU 0 is often held by a
-  # root-owned process). Honors a pre-set CUDA_VISIBLE_DEVICES.
-  if [ -z "${CUDA_VISIBLE_DEVICES:-}" ] && command -v nvidia-smi >/dev/null 2>&1; then
-    GPU=$(nvidia-smi --query-gpu=index,memory.free --format=csv,noheader,nounits \
-          | sort -t, -k2 -nr | head -1 | cut -d, -f1 | tr -d ' ')
-    [ -n "$GPU" ] && export CUDA_VISIBLE_DEVICES="$GPU" && echo "• auto-selected GPU $GPU (most free memory)"
-  fi
+  # Default to GPU 0 (standard). To run on another GPU (e.g. if 0 is busy):
+  #   CUDA_VISIBLE_DEVICES=1 ./scripts/dev_refresh.sh
+  export CUDA_VISIBLE_DEVICES="${CUDA_VISIBLE_DEVICES:-0}"
+  echo "• CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
   nohup "$PY" main.py --listen 0.0.0.0 --port "$PORT" > "$LOG" 2>&1 &
   echo "• launched (pid $!) → $LOG"
 fi

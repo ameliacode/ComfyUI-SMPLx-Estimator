@@ -32,7 +32,16 @@ _nlf_cache: dict = {}
 
 def load_nlf(model_path: str, device: str):
     """Load (and cache) the NLF TorchScript model. Needs torchvision imported so the
-    serialized ``torchvision::nms`` op resolves."""
+    serialized ``torchvision::nms`` op resolves.
+
+    NLF's released TorchScript is GPU-only: its exported detector bakes
+    torch.device("cuda:0") into the graph, so it cannot run on CPU."""
+    if not str(device).startswith("cuda"):
+        raise RuntimeError(
+            "NLF's released TorchScript model is GPU-only (cuda:0 is baked into the "
+            "exported detector), so it cannot run on CPU. Set device=cuda on 'Load NLF' "
+            "(free GPU memory if it OOMs), or use 'Full Body: Multi-HMR' which runs on CPU."
+        )
     if not os.path.isfile(model_path):
         raise FileNotFoundError(
             f"NLF model not found: {model_path!r}. Download "

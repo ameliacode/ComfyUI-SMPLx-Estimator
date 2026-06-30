@@ -64,8 +64,14 @@ def load_wilor(ckpt_path=DEFAULT_WILOR_CKPT, detector_path=DEFAULT_WILOR_DETECTO
     cfg.MANO.MEAN_PARAMS = os.path.join(_MANO_DIR, "mano_mean_params.npz")
     cfg.freeze()
 
-    model = WiLoR.load_from_checkpoint(ckpt_path, strict=False, cfg=cfg,
-                                       init_renderer=False).to(device).eval()
+    # Lightning's load_from_checkpoint can't pass weights_only=False, and the ckpt
+    # pickles non-tensor globals (trusted source) that torch 2.6 rejects by default.
+    # So load the Lightning ckpt manually and build the model ourselves.
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    state = ckpt.get("state_dict", ckpt) if isinstance(ckpt, dict) else ckpt
+    model = WiLoR(cfg, init_renderer=False)
+    model.load_state_dict(state, strict=False)
+    model = model.to(device).eval()
     detector = YOLO(detector_path)
     _cache[key] = (model, cfg, detector)
     return _cache[key]

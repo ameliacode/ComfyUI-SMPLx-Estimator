@@ -4,8 +4,6 @@ __pycache__/
 *.pyc
 venv/
 config/logs/
-vendor/**/__pycache__/
-vendor/**/build/
 
 # Large model weights — keep out of git (download / place in ComfyUI/models)
 checkpoints/
@@ -14,13 +12,8 @@ checkpoints/
 *.onnx
 *.torchscript
 
-# Third-party vendored source (has its own git; re-clonable)
-vendor/
-
-# Machine-local Claude settings + markers
-.claude/settings.local.json
-.codex
-
-.github/
+# Machine-local / internal dev — not part of the published node
 .claude/
+.codex
 working_memory/
+sources/

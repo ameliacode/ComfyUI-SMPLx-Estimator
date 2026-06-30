@@ -180,7 +180,7 @@ class LoadNLF:
         }}
 
     RETURN_TYPES = ("NLF_MODEL",)
-    RETURN_NAMES = ("nlf_model",)
+    RETURN_NAMES = ("model",)
     FUNCTION = "load"
     CATEGORY = "editpose/loaders"
 
@@ -201,7 +201,7 @@ class LoadMultiHMR:
         }}
 
     RETURN_TYPES = ("MULTIHMR_MODEL",)
-    RETURN_NAMES = ("multihmr_model",)
+    RETURN_NAMES = ("model",)
     FUNCTION = "load"
     CATEGORY = "editpose/loaders"
 
@@ -226,7 +226,7 @@ class LoadWiLoR:
         }}
 
     RETURN_TYPES = ("WILOR_MODEL",)
-    RETURN_NAMES = ("wilor_model",)
+    RETURN_NAMES = ("model",)
     FUNCTION = "load"
     CATEGORY = "editpose/loaders"
 

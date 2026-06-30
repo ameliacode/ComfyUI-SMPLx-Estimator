@@ -23,7 +23,7 @@ class WiLoRHandEstimator:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "wilor_model": ("WILOR_MODEL",),
+                "model": ("WILOR_MODEL",),
                 "image": ("IMAGE",),
                 "conf": ("FLOAT", {"default": 0.3, "min": 0.05, "max": 0.9, "step": 0.05,
                                    "tooltip": "Hand detection confidence threshold."}),
@@ -36,14 +36,14 @@ class WiLoRHandEstimator:
     CATEGORY = "editpose"
 
     @classmethod
-    def IS_CHANGED(cls, wilor_model, image, conf):
+    def IS_CHANGED(cls, model, image, conf):
         h = hashlib.sha256()
         h.update(np.asarray(image).tobytes())
-        h.update(repr((wilor_model.get("device"), id(wilor_model.get("model")), conf)).encode())
+        h.update(repr((model.get("device"), id(model.get("model")), conf)).encode())
         return h.hexdigest()
 
-    def estimate(self, wilor_model, image, conf):
-        b = wilor_model
+    def estimate(self, model, image, conf):
+        b = model
         dev = b["device"]
         rgb01 = image[0].cpu().numpy().astype(np.float32)
         hp = estimate_hand_pose(b["model"], b["cfg"], b["detector"], rgb01, dev, conf=conf)

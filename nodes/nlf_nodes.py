@@ -39,7 +39,7 @@ class NLFSMPLXEstimator:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "nlf_model": ("NLF_MODEL",),
+                "model": ("NLF_MODEL",),
                 "image": ("IMAGE",),
             },
             "optional": {
@@ -56,19 +56,19 @@ class NLFSMPLXEstimator:
     CATEGORY = "editpose"
 
     @classmethod
-    def IS_CHANGED(cls, nlf_model, image, hands_from=None):
+    def IS_CHANGED(cls, model, image, hands_from=None):
         h = hashlib.sha256()
         h.update(np.asarray(image).tobytes())
-        h.update(repr((nlf_model.get("smplx_parent"), nlf_model.get("gender"),
-                       nlf_model.get("device"), id(nlf_model.get("model")))).encode())
+        h.update(repr((model.get("smplx_parent"), model.get("gender"),
+                       model.get("device"), id(model.get("model")))).encode())
         if hands_from:
             for k in ("left_hand_pose", "right_hand_pose", "jaw_pose", "expression"):
                 if k in hands_from:
                     h.update(np.asarray(hands_from[k], np.float32).tobytes())
         return h.hexdigest()
 
-    def estimate(self, nlf_model, image, hands_from=None):
-        b = nlf_model
+    def estimate(self, model, image, hands_from=None):
+        b = model
         dev = b["device"]
         rgb01 = image[0].cpu().numpy().astype(np.float32)
         params = estimate_smplx_params(b["model"], rgb01, dev)

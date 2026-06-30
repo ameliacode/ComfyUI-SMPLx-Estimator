@@ -41,7 +41,7 @@ class MultiHMREstimator:
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "multihmr_model": ("MULTIHMR_MODEL",),
+                "model": ("MULTIHMR_MODEL",),
                 "image": ("IMAGE",),
                 "det_thresh": ("FLOAT", {"default": 0.3, "min": 0.05, "max": 0.9, "step": 0.05,
                                          "tooltip": "Person detection threshold."}),
@@ -55,16 +55,16 @@ class MultiHMREstimator:
     CATEGORY = "editpose"
 
     @classmethod
-    def IS_CHANGED(cls, multihmr_model, image, det_thresh):
+    def IS_CHANGED(cls, model, image, det_thresh):
         h = hashlib.sha256()
         h.update(np.asarray(image).tobytes())
-        h.update(repr((multihmr_model.get("smplx_parent"), multihmr_model.get("gender"),
-                       multihmr_model.get("device"), id(multihmr_model.get("model")),
+        h.update(repr((model.get("smplx_parent"), model.get("gender"),
+                       model.get("device"), id(model.get("model")),
                        det_thresh)).encode())
         return h.hexdigest()
 
-    def estimate(self, multihmr_model, image, det_thresh):
-        b = multihmr_model
+    def estimate(self, model, image, det_thresh):
+        b = model
         dev = b["device"]
         rgb01 = image[0].cpu().numpy().astype(np.float32)
         params = estimate_smplx_params(b["model"], b["img_size"], rgb01, dev, det_thresh=det_thresh)

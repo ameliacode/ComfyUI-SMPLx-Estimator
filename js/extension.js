@@ -10,10 +10,10 @@ function getWidget(node, name) {
 // ── embedded three.js SMPL-X editor (iframe viewer) ───────────────────────────────
 
 function createEmbeddedNativePose3DEditor(node) {
-    const NODE_MIN_WIDTH = 380;
-    const CONTROLS_BAR = 64;          // approx height of the controls bar below the 3D view
+    const NODE_MIN_WIDTH = 420;
+    const CONTROLS_BAR = 76;          // MUST match #controls fixed height in viewer_pose3d.html
     const NODE_CHROME_HEIGHT = 130;   // node title + input widgets above the viewer
-    // iframe height = width + bar  ->  the 3D view above the bar is ~square (w x w).
+    // iframe height = width + bar  ->  the 3D view above the bar is exactly square (w x w).
     const iframeHeight = (w) => Math.max(w, NODE_MIN_WIDTH) + CONTROLS_BAR;
     const NODE_MIN_HEIGHT = iframeHeight(NODE_MIN_WIDTH) + NODE_CHROME_HEIGHT;
 

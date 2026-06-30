@@ -36,7 +36,8 @@
             z-index: 10;
         }
         #controls {
-            flex: 0 0 auto;            /* full-width bar directly below the viewer */
+            flex: 0 0 76px;            /* fixed-height bar below the square viewer */
+            height: 76px;
             background: rgba(26, 26, 26, 0.95);
             border-top: 1px solid #444;
             padding: 6px 8px;
@@ -44,9 +45,9 @@
             font-size: 11px;
             display: flex;
             flex-flow: row wrap;
+            align-content: flex-start;
             align-items: center;
             gap: 4px 10px;
-            max-height: 40%;
             overflow-y: auto;
             box-sizing: border-box;
         }

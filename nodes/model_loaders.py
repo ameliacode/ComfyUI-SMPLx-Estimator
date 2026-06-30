@@ -12,6 +12,7 @@ SMPL-X model directory is missing.
 import os
 
 import folder_paths
+import torch
 
 from ..modules.nlf.estimate import load_nlf
 from ..modules.multihmr.estimate import load_multihmr
@@ -53,6 +54,18 @@ _GENDERS = ["neutral", "male", "female"]
 _DEVICES = ["auto", "cuda", "cpu"]
 
 
+def _oom_fallback(dev, fn):
+    """Run fn(dev); on CUDA OOM (GPU busy), retry on CPU. For CPU-capable models."""
+    try:
+        return fn(dev)
+    except torch.OutOfMemoryError:
+        if dev == "cpu":
+            raise
+        torch.cuda.empty_cache()
+        print("[model_loaders] CUDA out of memory at load — retrying on CPU (slower).")
+        return fn("cpu")
+
+
 class LoadNLF:
     @classmethod
     def INPUT_TYPES(cls):
@@ -92,11 +105,14 @@ class LoadMultiHMR:
     CATEGORY = "editpose/loaders"
 
     def load(self, multihmr_model, smplx_model_path, gender, device):
-        dev = resolve_device(device)
         _check_smplx(smplx_model_path, gender)
-        model, img_size = load_multihmr(_resolve("multihmr", multihmr_model), smplx_model_path, dev)
-        return ({"model": model, "img_size": img_size, "smplx_parent": smplx_model_path,
-                 "gender": gender, "device": dev},)
+        ckpt = _resolve("multihmr", multihmr_model)
+
+        def _do(dev):
+            model, img_size = load_multihmr(ckpt, smplx_model_path, dev)
+            return ({"model": model, "img_size": img_size, "smplx_parent": smplx_model_path,
+                     "gender": gender, "device": dev},)
+        return _oom_fallback(resolve_device(device), _do)
 
 
 class LoadWiLoR:
@@ -114,6 +130,10 @@ class LoadWiLoR:
     CATEGORY = "editpose/loaders"
 
     def load(self, wilor_model, detector, device):
-        dev = resolve_device(device)
-        model, cfg, det = load_wilor(_resolve("wilor", wilor_model), _resolve("wilor", detector), dev)
-        return ({"model": model, "cfg": cfg, "detector": det, "device": dev},)
+        ckpt = _resolve("wilor", wilor_model)
+        detp = _resolve("wilor", detector)
+
+        def _do(dev):
+            model, cfg, det = load_wilor(ckpt, detp, dev)
+            return ({"model": model, "cfg": cfg, "detector": det, "device": dev},)
+        return _oom_fallback(resolve_device(device), _do)

@@ -129,12 +129,12 @@
 
         <div id="status">No mesh loaded</div>
     </div>
-    <!-- three.js via CDN importmap (comfy-3d-viewers convention) -->
+    <!-- three.js self-hosted (offline-safe) via local importmap -->
     <script type="importmap">
     {
         "imports": {
-            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
-            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+            "three": "./three/three.module.js",
+            "three/addons/": "./three/addons/"
         }
     }
     </script>

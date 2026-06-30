@@ -70,7 +70,7 @@ class LoadNLF:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "nlf_model": (_list("nlf"),),
+            "model": (_list("nlf"),),
             "smplx_model_path": ("STRING", {"default": DEFAULT_SMPLX_PARENT}),
             "gender": (_GENDERS,),
             "device": (_DEVICES,),
@@ -81,11 +81,11 @@ class LoadNLF:
     FUNCTION = "load"
     CATEGORY = "editpose/loaders"
 
-    def load(self, nlf_model, smplx_model_path, gender, device):
+    def load(self, model, smplx_model_path, gender, device):
         dev = resolve_device(device)
         _check_smplx(smplx_model_path, gender)
-        model = load_nlf(_resolve("nlf", nlf_model), dev)
-        return ({"model": model, "smplx_parent": smplx_model_path,
+        net = load_nlf(_resolve("nlf", model), dev)
+        return ({"model": net, "smplx_parent": smplx_model_path,
                  "gender": gender, "device": dev},)
 
 
@@ -93,7 +93,7 @@ class LoadMultiHMR:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "multihmr_model": (_list("multihmr"),),
+            "model": (_list("multihmr"),),
             "smplx_model_path": ("STRING", {"default": DEFAULT_SMPLX_PARENT}),
             "gender": (_GENDERS,),
             "device": (_DEVICES,),
@@ -104,9 +104,9 @@ class LoadMultiHMR:
     FUNCTION = "load"
     CATEGORY = "editpose/loaders"
 
-    def load(self, multihmr_model, smplx_model_path, gender, device):
+    def load(self, model, smplx_model_path, gender, device):
         _check_smplx(smplx_model_path, gender)
-        ckpt = _resolve("multihmr", multihmr_model)
+        ckpt = _resolve("multihmr", model)
 
         def _do(dev):
             model, img_size = load_multihmr(ckpt, smplx_model_path, dev)
@@ -119,7 +119,7 @@ class LoadWiLoR:
     @classmethod
     def INPUT_TYPES(cls):
         return {"required": {
-            "wilor_model": (_list("wilor"),),
+            "model": (_list("wilor"),),
             "detector": (_list("wilor"),),
             "device": (_DEVICES,),
         }}
@@ -129,8 +129,8 @@ class LoadWiLoR:
     FUNCTION = "load"
     CATEGORY = "editpose/loaders"
 
-    def load(self, wilor_model, detector, device):
-        ckpt = _resolve("wilor", wilor_model)
+    def load(self, model, detector, device):
+        ckpt = _resolve("wilor", model)
         detp = _resolve("wilor", detector)
 
         def _do(dev):

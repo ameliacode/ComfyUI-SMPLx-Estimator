@@ -18,7 +18,7 @@ from typing import Optional
 import numpy as np
 import torch
 
-from ..modules.smplx_fit.model import load_smplx, resolve_device, DEFAULT_SMPLX_PARENT
+from ..modules.smplx_fit.model import load_smplx, resolve_device
 from ..modules.smplx_fit.fitting import resolve_edit, resolve_hand_edit
 from ..modules.smplx_fit.joint_maps import (
     body_limbs, editable_limbs, EDITABLE_JOINTS, NUM_BODY_JOINTS,

@@ -20,8 +20,16 @@ import torch
 
 log = logging.getLogger(__name__)
 
-# Default on-disk asset location (kept OUT of the repo; loaded by path).
-DEFAULT_SMPLX_PARENT = "/home/wswg3/github/Sitcom-Crafter/weights"
+# Default SMPL-X location: the standard ComfyUI models/smplx/ folder (resolved via
+# folder_paths at runtime). Users drop SMPLX_<GENDER>.npz there. Falls back for
+# headless test runs where ComfyUI isn't on the path.
+try:
+    import folder_paths as _fp
+    _MODELS_DIR = _fp.models_dir
+except Exception:
+    _MODELS_DIR = os.environ.get(
+        "COMFYUI_MODELS_DIR", os.path.expanduser("~/github/ComfyUI/models"))
+DEFAULT_SMPLX_PARENT = os.path.join(_MODELS_DIR, "smplx")
 
 
 def _resolve_model_parent(path: str) -> str:

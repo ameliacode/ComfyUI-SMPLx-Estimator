@@ -21,7 +21,7 @@ import torch
 from ..modules.nlf.estimate import load_nlf
 from ..modules.multihmr.estimate import load_multihmr
 from ..modules.wilor.estimate import load_wilor
-from ..modules.smplx_fit.model import resolve_device, DEFAULT_SMPLX_PARENT
+from ..modules.smplx_fit.model import resolve_device, DEFAULT_SMPLX_PARENT, _resolve_model_parent
 
 _GENDERS = ["neutral", "male", "female"]
 _DEVICES = ["auto", "cuda", "cpu"]
@@ -113,43 +113,43 @@ def _resolve_weight(key, repo_id, model_source, model_path, hf_token, filename):
 
 
 def _check_smplx(smplx_model_path, gender):
-    expected = os.path.join(os.path.expanduser(smplx_model_path), "smplx",
-                            f"SMPLX_{gender.upper()}.npz")
+    parent = _resolve_model_parent(smplx_model_path)   # accepts models/, models/smplx, or the .npz
+    expected = os.path.join(parent, "smplx", f"SMPLX_{gender.upper()}.npz")
     if not os.path.exists(expected):
         raise FileNotFoundError(
             f"SMPL-X model not found ({expected}). SMPL-X is registration-walled: register at "
-            f"https://smpl-x.is.tue.mpg.de/ and place SMPLX_{gender.upper()}.npz under "
-            f"<model_path>/smplx/, or use model_source=huggingface with a repo you can access."
+            f"https://smpl-x.is.tue.mpg.de/ and place SMPLX_{gender.upper()}.npz in "
+            f"ComfyUI/models/smplx/, or use model_source=huggingface with a repo you can access."
         )
 
 
 def _resolve_smplx(repo_id, model_source, gender, model_path, hf_token):
-    """Return the SMPL-X parent dir (containing smplx/SMPLX_<GENDER>.npz)."""
+    """Return a SMPL-X path load_smplx accepts. Standard layout is
+    ComfyUI/models/smplx/SMPLX_<GENDER>.npz."""
+    fname = f"SMPLX_{gender.upper()}.npz"
     if model_source == "huggingface":
-        parent = _local_dir("smplx")
-        dest_smplx = os.path.join(parent, "smplx")
-        fname = f"SMPLX_{gender.upper()}.npz"
-        target = os.path.join(dest_smplx, fname)
+        files_dir = _local_dir("smplx")                # ComfyUI/models/smplx
+        target = os.path.join(files_dir, fname)        # models/smplx/SMPLX_<GENDER>.npz
         if not os.path.isfile(target):
             if not repo_id:
                 raise ValueError("[Load SMPLx] no HuggingFace repo configured (REPO_ID is empty). "
                                  "Use model_source=local, or set REPO_ID in model_loaders.py.")
-            _hf_snapshot("SMPLx", repo_id, hf_token, parent,
+            _hf_snapshot("SMPLx", repo_id, hf_token, files_dir,
                          allow_patterns=["*.npz", "*.pkl", "smplx/*", "SMPLX/*", "**/SMPLX_*"])
-            if not os.path.isfile(target):             # normalize repo layout -> parent/smplx/
+            if not os.path.isfile(target):             # normalize varying repo layouts
                 import glob
                 import shutil
-                m = glob.glob(os.path.join(parent, "**", fname), recursive=True)
+                m = glob.glob(os.path.join(files_dir, "**", fname), recursive=True)
                 if not m:
                     raise FileNotFoundError(
                         f"[Load SMPLx] {fname} not found in HF repo {repo_id!r} after download.")
-                os.makedirs(dest_smplx, exist_ok=True)
                 if os.path.abspath(m[0]) != os.path.abspath(target):
                     shutil.copy(m[0], target)
+        path = files_dir
     else:
-        parent = os.path.expanduser((model_path or "").strip())
-    _check_smplx(parent, gender)
-    return parent
+        path = os.path.expanduser((model_path or "").strip())
+    _check_smplx(path, gender)
+    return path
 
 
 def _oom_fallback(dev, fn):
@@ -179,8 +179,8 @@ class LoadSMPLX:
             "model_source": (["local", "huggingface"],),
             "gender": (_GENDERS,),
             "model_path": ("STRING", {"default": DEFAULT_SMPLX_PARENT,
-                                      "tooltip": "Folder containing smplx/SMPLX_<GENDER>.npz "
-                                                 "(model_source=local)."}),
+                                      "tooltip": "SMPL-X folder (default: ComfyUI/models/smplx/ "
+                                                 "with SMPLX_<GENDER>.npz). model_source=local."}),
             "hf_token": ("STRING", {"default": "",
                                     "tooltip": "HuggingFace access token (model_source=huggingface)."}),
         }}

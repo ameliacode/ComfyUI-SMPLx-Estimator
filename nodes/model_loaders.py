@@ -149,7 +149,9 @@ def _resolve_smplx(repo_id, model_source, gender, model_path, hf_token):
     else:
         path = os.path.expanduser((model_path or "").strip())
     _check_smplx(path, gender)
-    return path
+    # Return the PARENT dir (consumers append "smplx/SMPLX_<GENDER>.npz"); normalises
+    # models/smplx -> models so Multi-HMR's SMPLX_DIR doesn't become models/smplx/smplx.
+    return _resolve_model_parent(path)
 
 
 def _oom_fallback(dev, fn):

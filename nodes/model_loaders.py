@@ -146,12 +146,10 @@ class LoadSMPLX:
         return {"required": {
             "model_source": (["local", "huggingface"],),
             "gender": (_GENDERS,),
-            "local_path": ("STRING", {"default": DEFAULT_SMPLX_PARENT,
-                                      "tooltip": "Folder containing smplx/SMPLX_<GENDER>.npz "
-                                                 "(used when model_source=local)."}),
-            "hf_repo": ("STRING", {"default": "",
-                                   "tooltip": "HuggingFace repo id hosting the SMPL-X .npz "
-                                              "(used when model_source=huggingface)."}),
+            "path_or_repo": ("STRING", {"default": DEFAULT_SMPLX_PARENT,
+                                        "tooltip": "local: folder containing "
+                                                   "smplx/SMPLX_<GENDER>.npz.  "
+                                                   "huggingface: repo id hosting the SMPL-X .npz."}),
         }}
 
     RETURN_TYPES = ("SMPLX_MODEL",)
@@ -159,13 +157,14 @@ class LoadSMPLX:
     FUNCTION = "load"
     CATEGORY = "editpose/loaders"
 
-    def load(self, model_source, gender, local_path, hf_repo):
+    def load(self, model_source, gender, path_or_repo):
+        src = path_or_repo.strip()
         if model_source == "huggingface":
-            if not hf_repo.strip():
-                raise ValueError("model_source=huggingface but hf_repo is empty — enter a repo id.")
-            parent = _hf_download_smplx(hf_repo.strip(), gender)
+            if not src:
+                raise ValueError("model_source=huggingface but path_or_repo is empty — enter a repo id.")
+            parent = _hf_download_smplx(src, gender)
         else:
-            parent = os.path.expanduser(local_path)
+            parent = os.path.expanduser(src)
         _check_smplx(parent, gender)
         return ({"model_path": parent, "gender": gender},)
 

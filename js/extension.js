@@ -10,19 +10,19 @@ function getWidget(node, name) {
 // ── embedded three.js SMPL-X editor (iframe viewer) ───────────────────────────────
 
 function createEmbeddedNativePose3DEditor(node) {
-    const VIEWER_HEIGHT = 320;
-    const NODE_MIN_WIDTH = 320;
-    const NODE_CHROME_HEIGHT = 130;
-    const NODE_MIN_HEIGHT = VIEWER_HEIGHT + NODE_CHROME_HEIGHT;
+    const NODE_MIN_WIDTH = 380;
+    const CONTROLS_BAR = 64;          // approx height of the controls bar below the 3D view
+    const NODE_CHROME_HEIGHT = 130;   // node title + input widgets above the viewer
+    // iframe height = width + bar  ->  the 3D view above the bar is ~square (w x w).
+    const iframeHeight = (w) => Math.max(w, NODE_MIN_WIDTH) + CONTROLS_BAR;
+    const NODE_MIN_HEIGHT = iframeHeight(NODE_MIN_WIDTH) + NODE_CHROME_HEIGHT;
 
     const viewerUrl = getViewerUrl("viewer_pose3d");
 
     const container = document.createElement("div");
     Object.assign(container.style, {
         width: "100%",
-        height: `${VIEWER_HEIGHT}px`,
-        minHeight: `${VIEWER_HEIGHT}px`,
-        maxHeight: `${VIEWER_HEIGHT}px`,
+        height: `${iframeHeight(NODE_MIN_WIDTH)}px`,
         flex: "0 0 auto",
         position: "relative",
         overflow: "hidden",
@@ -93,7 +93,9 @@ function createEmbeddedNativePose3DEditor(node) {
 
     widget.computeSize = function (width) {
         const w = Math.max(width || NODE_MIN_WIDTH, NODE_MIN_WIDTH);
-        return [w, VIEWER_HEIGHT];
+        const h = iframeHeight(w);            // height follows WIDTH -> square 3D view
+        if (container) container.style.height = `${h}px`;
+        return [w, h];
     };
     widget.element = container;
 
@@ -107,10 +109,8 @@ function createEmbeddedNativePose3DEditor(node) {
     const originalOnResize = node.onResize?.bind(node);
     node.onResize = function (size) {
         originalOnResize?.(size);
-        if (size?.[1] && size[1] < NODE_MIN_HEIGHT && typeof node.setSize === "function") {
-            node.setSize([Math.max(size[0] ?? NODE_MIN_WIDTH, NODE_MIN_WIDTH), NODE_MIN_HEIGHT]);
-        }
-        container.style.height = `${VIEWER_HEIGHT}px`;   // fixed — no resize feedback loop
+        const w = Math.max(size?.[0] ?? NODE_MIN_WIDTH, NODE_MIN_WIDTH);
+        container.style.height = `${iframeHeight(w)}px`;   // keep the 3D view square as width changes
     };
 
     widget.setPoseData = (pose3dData) => {
@@ -141,7 +141,8 @@ function createEmbeddedNativePose3DEditor(node) {
     // An earlier resize-feedback bug could bloat the node height and persist it into
     // saved graphs. Force the node back to its natural compact size on load.
     requestAnimationFrame(() => {
-        container.style.height = `${VIEWER_HEIGHT}px`;
+        const w = Math.max(node.size?.[0] ?? NODE_MIN_WIDTH, NODE_MIN_WIDTH);
+        container.style.height = `${iframeHeight(w)}px`;
         if (typeof node.computeSize === "function" && typeof node.setSize === "function") {
             const nat = node.computeSize();
             node.setSize([Math.max(node.size?.[0] ?? nat[0], NODE_MIN_WIDTH), nat[1]]);

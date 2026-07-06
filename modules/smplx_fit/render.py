@@ -1,119 +1,142 @@
 """
-Headless SMPL-X mesh rendering (PyTorch3D, GPU) -> ControlNet-style maps:
-pose (shaded), depth, normal, canny. Used by the SMPL-X editor's outputs.
+Headless SMPL-X mesh rendering -> ControlNet-style maps: pose (shaded), depth,
+normal, canny. Used by the SMPL-X editor's outputs and the estimator previews.
+
+Pure NumPy/OpenCV rasterizer (painter's algorithm) — no PyTorch3D / CUDA build /
+OpenGL, so it works on any torch/CUDA. cv2 is already a dependency.
 """
 
 import numpy as np
-import torch
 import cv2
 
 
-def _to_img(t):
-    return (t.clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
+def _to_img(a):
+    return (np.clip(a, 0, 1) * 255).astype(np.uint8)
 
 
-_WARNED_NO_P3D = False
+def _look_at(eye, at, up):
+    """Return world->view rotation R (3x3) for a camera at `eye` looking at `at`
+    (camera looks down -Z, OpenGL convention)."""
+    eye = np.asarray(eye, np.float64)
+    f = np.asarray(at, np.float64) - eye
+    f /= np.linalg.norm(f) + 1e-9
+    r = np.cross(f, np.asarray(up, np.float64))
+    r /= np.linalg.norm(r) + 1e-9
+    u = np.cross(r, f)
+    R = np.stack([r, u, -f], axis=0)                 # rows = view axes
+    return R, eye
 
 
-def render_maps(verts_np, faces_np, device, size=512, azim=0.0, ground=True,
+def _rasterize(V, faces, R, eye, fov_deg, size):
+    """Painter's-algorithm rasterizer.
+    Returns pix_to_face (H,W int32, -1=bg), zbuf (H,W float32 front-distance,
+    inf=bg), and fn_view (F,3) view-space face normals."""
+    Vv = (V - eye) @ R.T                             # view space; camera looks -Z
+    zc = -Vv[:, 2]                                    # front distance (>0 visible)
+    focal = 1.0 / np.tan(np.radians(fov_deg) * 0.5)
+    zsafe = np.maximum(zc, 1e-6)
+    px = ((focal * Vv[:, 0] / zsafe) * 0.5 + 0.5) * size
+    py = (1.0 - ((focal * Vv[:, 1] / zsafe) * 0.5 + 0.5)) * size   # y flipped
+    P = np.stack([px, py], axis=1)                    # (N,2) pixel coords
+
+    fv = P[faces]                                     # (F,3,2)
+    fz = zc[faces].mean(axis=1)                        # (F,) face depth
+    infront = (zc[faces] > 1e-6).all(axis=1)
+    finite = np.isfinite(fv).all(axis=(1, 2))
+    order = np.argsort(-fz)                            # far -> near
+    order = order[infront[order] & finite[order]]
+
+    pix_to_face = np.full((size, size), -1, np.int32)
+    for fi in order:                                  # near overwrites far
+        cv2.fillConvexPoly(pix_to_face, np.round(fv[fi]).astype(np.int32),
+                           int(fi), lineType=cv2.LINE_8)
+
+    # per-pixel depth via barycentric interpolation of the covering face
+    zbuf = np.full((size, size), np.inf, np.float32)
+    yy, xx = np.where(pix_to_face >= 0)
+    if len(xx):
+        pf = pix_to_face[yy, xx]
+        tri = fv[pf]                                  # (M,3,2)
+        a, b, c = tri[:, 0], tri[:, 1], tri[:, 2]
+        p = np.stack([xx, yy], axis=1).astype(np.float64)
+        v0, v1, v2 = b - a, c - a, p - a
+        den = v0[:, 0] * v1[:, 1] - v1[:, 0] * v0[:, 1]
+        den = np.where(np.abs(den) < 1e-9, 1e-9, den)
+        w1 = (v2[:, 0] * v1[:, 1] - v1[:, 0] * v2[:, 1]) / den
+        w2 = (v0[:, 0] * v2[:, 1] - v2[:, 0] * v0[:, 1]) / den
+        w0 = 1.0 - w1 - w2
+        fzc = zc[faces[pf]]                           # (M,3)
+        zbuf[yy, xx] = (w0 * fzc[:, 0] + w1 * fzc[:, 1] + w2 * fzc[:, 2]).astype(np.float32)
+
+    tv = V[faces]                                     # (F,3,3)
+    fn = np.cross(tv[:, 1] - tv[:, 0], tv[:, 2] - tv[:, 0])
+    fn /= np.linalg.norm(fn, axis=1, keepdims=True) + 1e-9
+    fn_view = fn @ R.T                                # world -> view
+    return pix_to_face, zbuf, fn_view
+
+
+def render_maps(verts_np, faces_np, device=None, size=512, azim=0.0, ground=True,
                 camera=None):
     """
     Render the SMPL-X mesh to (pose, depth, normal, canny) uint8 RGB images.
 
     verts_np: (V,3) world-metric (Y-up). faces_np: (F,3).
-    Default: front orthographic-ish view (perspective, fov 40) framed to the body.
+    Default: front perspective (fov 40) framed to the body.
 
     camera (optional): the editor's three.js camera as
     ``{"eye": [x,y,z], "at": [x,y,z], "up": [x,y,z], "fov": deg}`` in the SAME
-    world space as ``verts_np``. When given, the render is taken from that exact
-    viewpoint (eye/at/up fed to look_at_view_transform) so the output matches the
-    editor viewport. Auto framing is skipped.
-
-    Rasterization uses PyTorch3D. If it isn't installed (no prebuilt wheel for your
-    torch/CUDA), the maps come back blank with a one-time warning — estimation and
-    the interactive 3D editor still work, only the rendered maps are unavailable.
+    world space as ``verts_np`` — renders from that exact viewpoint so the output
+    matches the editor viewport. ``device`` is accepted for API compatibility.
     """
-    try:
-        from pytorch3d.structures import Meshes
-        from pytorch3d.renderer import (
-            look_at_view_transform, FoVPerspectiveCameras,
-            RasterizationSettings, MeshRasterizer,
-        )
-    except Exception:
-        global _WARNED_NO_P3D
-        if not _WARNED_NO_P3D:
-            print("[render] PyTorch3D not available — pose/depth/normal/canny maps will be "
-                  "blank. Install PyTorch3D to enable rendering: "
-                  "https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md")
-            _WARNED_NO_P3D = True
-        blank = np.zeros((size, size, 3), np.uint8)
-        return blank, blank.copy(), blank.copy(), blank.copy()
-
-    V = torch.as_tensor(np.asarray(verts_np), dtype=torch.float32, device=device)
-    Fc = torch.as_tensor(np.asarray(faces_np).astype(np.int64), device=device)
+    V = np.asarray(verts_np, np.float64).copy()
+    F = np.asarray(faces_np).astype(np.int64)
     if ground:
-        V = V.clone()
         V[:, 1] -= V[:, 1].min()                      # feet on Y=0
-    mesh = Meshes(verts=[V], faces=[Fc])
 
     if camera is not None:
-        eye = torch.tensor([camera["eye"]], dtype=torch.float32, device=device)
-        at = torch.tensor([camera.get("at", [0.0, 0.8, 0.0])], dtype=torch.float32, device=device)
-        up = torch.tensor([camera.get("up", [0.0, 1.0, 0.0])], dtype=torch.float32, device=device)
-        R, T = look_at_view_transform(eye=eye, at=at, up=up, device=device)
+        eye = camera["eye"]
+        at = camera.get("at", [0.0, 0.8, 0.0])
+        up = camera.get("up", [0.0, 1.0, 0.0])
         fov = float(camera.get("fov", 40.0))
+        R, eye = _look_at(eye, at, up)
     else:
         center = V.mean(0)
         h = float(V[:, 1].max() - V[:, 1].min())
         dist = max(h * 1.6, 0.6)
-        R, T = look_at_view_transform(dist=dist, elev=0.0, azim=azim,
-                                      at=center[None], up=((0, 1, 0),), device=device)
+        rad = np.radians(azim)
+        eye = center + np.array([np.sin(rad) * dist, 0.0, np.cos(rad) * dist])
+        R, eye = _look_at(eye, center, [0.0, 1.0, 0.0])
         fov = 40.0
-    cam = FoVPerspectiveCameras(device=device, R=R, T=T, fov=fov)
-    # bin_size=None -> coarse-to-fine binned rasterization (memory-efficient for a
-    # 20k-face mesh; bin_size=0 forces naive rasterization and OOMs on a shared GPU).
-    rs = RasterizationSettings(image_size=size, blur_radius=0.0, faces_per_pixel=1)
-    frag = MeshRasterizer(cameras=cam, raster_settings=rs)(mesh)
 
-    p2f = frag.pix_to_face[0, ..., 0]                 # (H,W) face idx, -1 = bg
-    zbuf = frag.zbuf[0, ..., 0]                       # (H,W) depth, -1 = bg
-    mask = p2f >= 0
+    pix_to_face, zbuf, fn_view = _rasterize(V, F, R, eye, fov, size)
+    mask = pix_to_face >= 0
 
-    # ── normal map (camera space) ────────────────────────────────────────────
-    fn = mesh.faces_normals_packed()                  # (F,3) world
-    fn_cam = fn @ R[0]                                 # rotate into camera frame
-    normal = torch.zeros(size, size, 3, device=device)
-    pf = p2f.clamp(min=0)
-    n = fn_cam[pf]                                     # (H,W,3)
-    n = torch.nn.functional.normalize(n, dim=-1)
-    normal_rgb = (n * 0.5 + 0.5)                       # [-1,1] -> [0,1]
+    # ── normal map (camera space, [-1,1] -> [0,1]) ───────────────────────────
+    n = np.zeros((size, size, 3), np.float64)
+    n[mask] = fn_view[pix_to_face[mask]]
+    n /= np.linalg.norm(n, axis=-1, keepdims=True) + 1e-9
+    normal_rgb = (n * 0.5 + 0.5)
     normal_rgb[~mask] = 0.0
-    normal = normal_rgb
 
-    # ── depth map (near=white) ───────────────────────────────────────────────
-    depth = torch.zeros(size, size, device=device)
+    # ── depth map (near = white) ─────────────────────────────────────────────
+    depth = np.zeros((size, size), np.float64)
     if mask.any():
         zv = zbuf[mask]
-        zmin, zmax = zv.min(), zv.max()
-        dn = 1.0 - (zbuf - zmin) / (zmax - zmin + 1e-6)   # near -> 1
-        depth[mask] = dn[mask].clamp(0, 1)
-    depth_rgb = depth[..., None].repeat(1, 1, 3)
+        zmin, zmax = float(zv.min()), float(zv.max())
+        depth[mask] = np.clip(1.0 - (zbuf[mask] - zmin) / (zmax - zmin + 1e-6), 0, 1)
+    depth_rgb = np.repeat(depth[..., None], 3, axis=2)
 
     # ── pose (frontal-lit shaded body) ───────────────────────────────────────
-    # |n_z| = how front-facing the surface is -> bright front, dim grazing edges.
-    shade = (n[..., 2].abs() * 0.7 + 0.3).clamp(0.0, 1.0)    # +0.3 ambient
-    pose = torch.zeros(size, size, 3, device=device)
-    body_col = torch.tensor([0.85, 0.72, 0.62], device=device)
-    pose[mask] = (shade[..., None] * body_col)[mask]
-    pose_rgb = pose
+    shade = np.clip(np.abs(n[..., 2]) * 0.7 + 0.3, 0.0, 1.0)     # front-facing -> bright
+    pose = np.zeros((size, size, 3), np.float64)
+    pose[mask] = shade[mask, None] * np.array([0.85, 0.72, 0.62])
 
-    pose_img = _to_img(pose_rgb)
+    pose_img = _to_img(pose)
     depth_img = _to_img(depth_rgb)
     normal_img = _to_img(normal_rgb)
 
     # ── canny (edges of the shaded body) ─────────────────────────────────────
-    gray = cv2.cvtColor(pose_img, cv2.COLOR_RGB2GRAY)
-    edges = cv2.Canny(gray, 40, 120)
+    edges = cv2.Canny(cv2.cvtColor(pose_img, cv2.COLOR_RGB2GRAY), 40, 120)
     canny_img = cv2.cvtColor(edges, cv2.COLOR_GRAY2RGB)
 
     return pose_img, depth_img, normal_img, canny_img

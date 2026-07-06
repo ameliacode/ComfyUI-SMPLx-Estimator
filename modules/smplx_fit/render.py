@@ -119,10 +119,13 @@ def render_maps(verts_np, faces_np, device=None, size=512, azim=0.0, ground=True
     normal_rgb[~mask] = 0.0
 
     # ── depth map (near = white) ─────────────────────────────────────────────
+    # Normalize on the 1st/99th percentiles, not min/max: a few rasterizer edge
+    # pixels extrapolate to far-off depths and, with min/max, crush the body's real
+    # ~0.2 m depth range into a flat band. Percentiles reject those outliers.
     depth = np.zeros((size, size), np.float64)
     if mask.any():
         zv = zbuf[mask]
-        zmin, zmax = float(zv.min()), float(zv.max())
+        zmin, zmax = float(np.percentile(zv, 1)), float(np.percentile(zv, 99))
         depth[mask] = np.clip(1.0 - (zbuf[mask] - zmin) / (zmax - zmin + 1e-6), 0, 1)
     depth_rgb = np.repeat(depth[..., None], 3, axis=2)
 

@@ -5,7 +5,7 @@ Body: NLF — robust single-image body -> SMPL-X.
 
 Robust body / global pose. NLF's released model is SMPL-only, so we map its body
 pose to SMPL-X with NEUTRAL shape (betas=0) and FLAT hands/face. Pose the hands in
-the editor, or feed a Hand: WiLoR result into `hands_from`.
+the editor, or feed a Hand: WiLoR result into `smplx_hands`.
 """
 
 import hashlib
@@ -43,7 +43,7 @@ class NLFSMPLXEstimator:
                 "image": ("IMAGE",),
             },
             "optional": {
-                "hands_from": ("SMPLX", {
+                "smplx_hands": ("SMPLX", {
                     "tooltip": "Optional SMPL-X (e.g. from Hand: WiLoR) to graft hand pose + "
                                "jaw + expression onto NLF's body (wrist-relative — no melt)."}),
             },
@@ -56,30 +56,30 @@ class NLFSMPLXEstimator:
     CATEGORY = "SMPLx Estimator"
 
     @classmethod
-    def IS_CHANGED(cls, model, image, hands_from=None):
+    def IS_CHANGED(cls, model, image, smplx_hands=None):
         h = hashlib.sha256()
         h.update(np.asarray(image).tobytes())
         h.update(repr((model.get("smplx_parent"), model.get("gender"),
                        model.get("device"), id(model.get("model")))).encode())
-        if hands_from:
+        if smplx_hands:
             for k in ("left_hand_pose", "right_hand_pose", "jaw_pose", "expression"):
-                if k in hands_from:
-                    h.update(np.asarray(hands_from[k], np.float32).tobytes())
+                if k in smplx_hands:
+                    h.update(np.asarray(smplx_hands[k], np.float32).tobytes())
         return h.hexdigest()
 
-    def estimate(self, model, image, hands_from=None):
+    def estimate(self, model, image, smplx_hands=None):
         b = model
         dev = b["device"]
         rgb01 = image[0].cpu().numpy().astype(np.float32)
         params = estimate_smplx_params(b["model"], rgb01, dev)
         smplx_model = load_smplx(b["smplx_parent"], b["gender"], dev)
         smplx_dict = _smplx_dict(params, b["gender"], b["smplx_parent"])
-        if hands_from:                                          # graft hands + expression
+        if smplx_hands:                                          # graft hands + expression
             for k in ("left_hand_pose", "right_hand_pose", "jaw_pose", "expression"):
-                if k in hands_from:
-                    smplx_dict[k] = np.asarray(hands_from[k], np.float32).copy()
+                if k in smplx_hands:
+                    smplx_dict[k] = np.asarray(smplx_hands[k], np.float32).copy()
         print(f"[nlf] estimated SMPL-X body on {dev}"
-              + (" + grafted hands/expression" if hands_from else ""))
+              + (" + grafted hands/expression" if smplx_hands else ""))
         verts, faces, joints = _forward_mesh(smplx_dict, smplx_model, dev)
         smplx_dict["joints_3d"] = joints
         smplx_dict, verts = _ground(smplx_dict, verts)

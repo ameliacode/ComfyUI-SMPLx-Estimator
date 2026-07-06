@@ -89,43 +89,21 @@ or fetch from a HuggingFace repo (`model_source = huggingface`, with an optional
 
 ## License
 
-Wrapper code: **MIT** ([LICENSE](LICENSE)). Otherwise this project follows the licenses of the models
-it vendors and uses — all **non-commercial** (see [Attribution](#attribution)) — so the package and
-its outputs are for **research / non-commercial use only**.
+Wrapper code is **MIT** ([LICENSE](LICENSE)). The vendored estimators and model weights keep their
+own **non-commercial** licenses (see the [Models & weights](#models--weights) table), so the package
+and its outputs are for **research / non-commercial use only**. Please cite and comply with each original.
 
 ## Attribution
 
-This package **vendors** third-party estimator source (cloned into `vendor/` by `install.py`) and
-loads third-party model weights. Each is the work of its original authors and is used under its own
-**non-commercial** license — please cite and comply with the originals.
+This package vendors third-party estimator source (cloned into `vendor/` by `install.py`) and loads
+third-party weights, each under its own license:
 
-**Multi-HMR** — NAVER Corp.
-- Repository: https://github.com/naver/multi-hmr
-- Vendored at: `vendor/multi-hmr/` (cloned on install)
-- License: NAVER non-commercial (CC BY-NC-SA 4.0)
-- Paper: *Multi-HMR: Multi-Person Whole-Body Human Mesh Recovery in a Single Shot* (ECCV 2024)
-
-**WiLoR** — Potamias et al.
-- Repository: https://github.com/rolpotamias/WiLoR
-- Vendored at: `vendor/WiLoR/` (cloned on install)
-- License: CC BY-NC-ND 4.0 (non-commercial, **no derivatives**)
-- Paper: *WiLoR: End-to-end 3D Hand Localization and Reconstruction in-the-wild* (2024)
-
-**NLF** — Sárándi & Pons-Moll
-- Repository: https://github.com/isarandi/nlf
-- Used as the released TorchScript model (loaded from `models/nlf/`)
-- License: CC BY-NC 4.0
-- Paper: *Neural Localizer Fields for Continuous 3D Human Pose and Shape Estimation* (NeurIPS 2024)
-
-**SMPL-X / MANO** — Max Planck Institute for Intelligent Systems — registration-walled body / hand
-models ([smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de/) · [mano.is.tue.mpg.de](https://mano.is.tue.mpg.de/)).
-
-Unlike permissively-licensed projects, these models are **non-commercial** (and WiLoR is
-**no-derivatives**), so the vendored code is redistributed only as permitted by each license —
-i.e. use, reproduction, and distribution for **research / non-commercial** purposes. We gratefully
-acknowledge these authors for making their work available to the research community.
+- **Multi-HMR** — NAVER Corp. · CC BY-NC-SA 4.0 · [repo](https://github.com/naver/multi-hmr) · *Multi-HMR* (ECCV 2024)
+- **WiLoR** — Potamias et al. · CC BY-NC-ND 4.0 (no derivatives) · [repo](https://github.com/rolpotamias/WiLoR) · *WiLoR* (2024)
+- **NLF** — Sárándi & Pons-Moll · CC BY-NC 4.0 · [repo](https://github.com/isarandi/nlf) · *Neural Localizer Fields* (NeurIPS 2024)
+- **SMPL-X / MANO** — Max Planck Institute — registration-walled · [smpl-x](https://smpl-x.is.tue.mpg.de/) · [mano](https://mano.is.tue.mpg.de/)
 
 ## Acknowledgements
 
 - 3D viewer based on [comfy-3d-viewers](https://github.com/PozzettiAndrea/comfy-3d-viewers); editor UI inspired by [ComfyUI-SAM3DBody](https://github.com/PozzettiAndrea/ComfyUI-SAM3DBody)
-- Model authors are credited in [Attribution](#attribution) above.
+- Thanks to the model authors above for sharing their work with the research community.

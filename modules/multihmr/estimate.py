@@ -40,6 +40,29 @@ _normalize_rgb = None    # captured utils.image.normalize_rgb
 _get_focal = None        # captured utils.camera.get_focalLength_from_fieldOfView
 
 
+def _ensure_render_stubs():
+    """Stub pyrender/pyvista so vendor code that does `import pyrender` at module
+    scope loads without the (optional, inference-unused) renderer installed."""
+    import types
+
+    class _Dummy:
+        def __getattr__(self, _n):
+            return _Dummy()
+
+        def __call__(self, *a, **k):
+            return _Dummy()
+
+    for name in ("pyrender", "pyvista"):
+        if name in sys.modules:
+            continue
+        try:
+            __import__(name)
+        except Exception:
+            m = types.ModuleType(name)
+            m.__getattr__ = lambda _n: _Dummy()
+            sys.modules[name] = m
+
+
 def _prepare_imports(smplx_parent):
     """
     Import Multi-HMR's ``model``/``blocks``/``utils`` in ISOLATION from ComfyUI's own
@@ -55,6 +78,7 @@ def _prepare_imports(smplx_parent):
     global _Model, _normalize_rgb, _get_focal
     if _Model is not None:
         return
+    _ensure_render_stubs()          # let vendor `import pyrender` succeed on fresh clones
     import importlib
 
     def _match(n):

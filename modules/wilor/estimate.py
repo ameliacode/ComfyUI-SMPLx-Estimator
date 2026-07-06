@@ -35,6 +35,27 @@ _MANO_DIR = os.path.join(WILOR_DIR, "mano_data")
 _cache: dict = {}
 
 
+def _ensure_render_stubs():
+    """Stub pyrender so WiLoR's renderer modules (`import pyrender` at module scope)
+    load without the optional, inference-unused renderer installed."""
+    import types
+
+    class _Dummy:
+        def __getattr__(self, _n):
+            return _Dummy()
+
+        def __call__(self, *a, **k):
+            return _Dummy()
+
+    if "pyrender" not in sys.modules:
+        try:
+            __import__("pyrender")
+        except Exception:
+            m = types.ModuleType("pyrender")
+            m.__getattr__ = lambda _n: _Dummy()
+            sys.modules["pyrender"] = m
+
+
 def load_wilor(ckpt_path=DEFAULT_WILOR_CKPT, detector_path=DEFAULT_WILOR_DETECTOR, device="cuda"):
     """Load (and cache) the WiLoR model + YOLO hand detector.
 
@@ -52,6 +73,7 @@ def load_wilor(ckpt_path=DEFAULT_WILOR_CKPT, detector_path=DEFAULT_WILOR_DETECTO
             )
     if WILOR_DIR not in sys.path:
         sys.path.insert(0, WILOR_DIR)
+    _ensure_render_stubs()          # let vendor `import pyrender` succeed on fresh clones
     from wilor.models import WiLoR
     from wilor.configs import get_config
     from ultralytics import YOLO

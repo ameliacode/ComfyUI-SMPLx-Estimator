@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
-# dev_refresh.sh — develop → refresh test loop for the comfyui-mocap node.
+# dev_refresh.sh — develop → refresh test loop for the comfyui-smplx-estimator node.
 #
 # Run this every time you finish a development change. It:
 #   1. (optional) runs pytest if a test suite + pytest are available
 #   2. restarts the tester ComfyUI at ~/github/ComfyUI
 #   3. waits for the server to come up
-#   4. verifies the comfyui-mocap node imported cleanly (no IMPORT FAILED)
+#   4. verifies the comfyui-smplx-estimator node imported cleanly (no IMPORT FAILED)
 #   5. confirms ClickPose / MotionAGFormer / 3D Pose Editor are registered
 #      via the /object_info API (authoritative)
 #
@@ -110,7 +110,7 @@ if grep -iq "$NODE_FOLDER.*IMPORT FAILED\|IMPORT FAILED.*$NODE_FOLDER" "$LOG"; t
   fail "$NODE_FOLDER reported IMPORT FAILED"
 fi
 # A real failure in our code leaves a traceback frame pointing at a .py under
-# custom_nodes/comfyui-mocap/ (or our package modules).
+# custom_nodes/comfyui-smplx-estimator/ (or our package modules).
 if grep -qE 'File ".*custom_nodes/'"$NODE_FOLDER"'/.*\.py"' "$LOG"; then
   c_ylw "• a traceback frame points inside the node — inspect:"
   grep -nE 'File ".*custom_nodes/'"$NODE_FOLDER"'/.*\.py"|Error|Traceback' "$LOG" | tail -15
@@ -135,7 +135,7 @@ done
 [ "${#missing[@]}" -eq 0 ] || fail "nodes not registered: ${missing[*]}"
 
 step "Import timing (for reference)"
-grep -i "$NODE_FOLDER\|comfyui-mocap" "$LOG" | grep -i "second\|import" | tail -3 || true
+grep -i "$NODE_FOLDER\|comfyui-smplx-estimator" "$LOG" | grep -i "second\|import" | tail -3 || true
 
 c_grn "✔ ALL GOOD — node reloaded cleanly and all ${#EXPECTED_NODES[@]} nodes are registered."
 echo "  UI: http://$HOST:$PORT/   ·   JS changes: browser hard-refresh (Ctrl+Shift+R)"

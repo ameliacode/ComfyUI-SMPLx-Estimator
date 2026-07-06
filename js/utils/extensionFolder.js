@@ -20,7 +20,7 @@ export const EXTENSION_FOLDER = (() => {
     } catch (_) {
         // Best effort only.
     }
-    return "comfyui-mocap";
+    return "comfyui-smplx-estimator";
 })();
 
 /**

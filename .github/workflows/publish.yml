@@ -11,13 +11,12 @@ permissions:
 
 jobs:
   publish-node:
+    name: Publish Custom Node to registry
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Check out code
+        uses: actions/checkout@v4
+      - name: Publish Custom Node
+        uses: Comfy-Org/publish-node-action@main
         with:
-          python-version: "3.12"
-      - run: pip install comfy-cli
-      - run: comfy node publish --token "$COMFY_API_KEY"
-        env:
-          COMFY_API_KEY: ${{ secrets.COMFY_API_KEY }}
+          personal_access_token: ${{ secrets.COMFY_API_KEY }}

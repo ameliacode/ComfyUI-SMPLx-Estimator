@@ -311,6 +311,8 @@
         let bodyMesh = null;              // SMPL-X surface mesh
         const movedTargets = new Map();   // directly-dragged jointIdx -> [x,y,z]
         const undoStack = [];             // pre-edit snapshots for Ctrl+Z
+        let jointRot = [];                // per-joint world rotation delta (THREE.Quaternion) for LBS
+        const _idQuat = new THREE.Quaternion();
         let dragBase = null;              // {start, desc:[{c,pos}]} captured at drag start
         // Live soft-skinning state: base (undeformed) verts + per-vertex skin
         // (top-k jointIdx/weight in 0-54 space) + bind joint positions (all 55).
@@ -392,29 +394,38 @@
         function beginDrag() {
             const s = tcontrols.object;
             if (!s) { dragBase = null; return; }
-            const desc = descendantsOf(s.userData.jointIdx);
+            const affected = [s.userData.jointIdx, ...descendantsOf(s.userData.jointIdx)];
+            const rotStart = {};
+            for (const idx of affected) rotStart[idx] = (jointRot[idx] || _idQuat).clone();
             dragBase = {
+                joint: s.userData.jointIdx,
                 start: s.position.clone(),
                 startQuat: s.quaternion.clone(),     // for rotate mode
                 pivot: s.position.clone(),           // rotation pivot = the joint
-                desc: desc.map(c => ({ c, pos: jointSpheres[c].position.clone() })),
+                desc: affected.slice(1).map(c => ({ c, pos: jointSpheres[c].position.clone() })),
+                rotStart,
                 // snapshot BEFORE this edit, for Ctrl+Z
                 pre: {
-                    joints: [s.userData.jointIdx, ...desc].map(idx => ({
-                        idx, pos: jointSpheres[idx].position.toArray(),
+                    joints: affected.map(idx => ({
+                        idx,
+                        pos: jointSpheres[idx].position.toArray(),
+                        rot: (jointRot[idx] || _idQuat).toArray(),
                     })),
                     moved: [...movedTargets.entries()].map(([k, v]) => [k, v.slice()]),
                 },
             };
         }
-        // Move mode: descendants translate by the same delta. Rotate mode: descendants
-        // orbit the joint by the gizmo's rotation (IK reproduces it on re-queue).
+        // Move mode: descendants translate by the same delta. Rotate mode: the joint
+        // sub-chain orbits the joint AND each joint's LBS rotation is updated so the
+        // skinned surface rotates with it (IK reproduces it on re-queue).
         function dragPropagate() {
             if (!dragBase || !tcontrols.object) return;
             const s = tcontrols.object;
             if (tcontrols.mode === "rotate") {
                 const dq = s.quaternion.clone().multiply(dragBase.startQuat.clone().invert());
+                jointRot[dragBase.joint] = dq.clone().multiply(dragBase.rotStart[dragBase.joint]);
                 for (const { c, pos } of dragBase.desc) {
+                    jointRot[c] = dq.clone().multiply(dragBase.rotStart[c]);
                     const rel = pos.clone().sub(dragBase.pivot).applyQuaternion(dq);
                     jointSpheres[c].position.copy(dragBase.pivot).add(rel);
                 }
@@ -432,6 +443,7 @@
             const editable = pose3d.editable || J.map((_, i) => i);
             movedTargets.clear();
             bindJoints = J.map(p => [p[0], p[1], p[2]]);   // rest pose for skinning
+            jointRot = J.map(() => new THREE.Quaternion());   // identity rotations at bind
 
             // children map (parent -> children) for rigid descendant-follow on drag
             childrenMap = {};
@@ -505,39 +517,49 @@
             sendCamera();          // seed the node's camera widget with this view
         }
 
-        // Live weight-blended soft-skinning: each vertex follows the joints it is
-        // weighted to. v = base + Σ_k w_k * (joint_now[idx_k] - joint_bind[idx_k]).
-        // A fast linear preview of the skinned surface; the server IK re-solve is
-        // still the authoritative deformation pushed back on re-queue.
+        // Live Linear Blend Skinning preview: each vertex is transformed by the joints
+        // it is weighted to, using each joint's ROTATION + current position:
+        //   v = Σ_k w_k * ( R_k · (base - bind_k) + now_k )
+        // With R_k = identity this reduces to the old translation blend; with rotation
+        // (rotate mode) the surface actually rotates about the joint. The server IK
+        // re-solve remains the authoritative deformation pushed back on re-queue.
+        const _skM4 = new THREE.Matrix4();
         function applySkinning() {
             if (!bodyMesh || !meshBaseVerts || !skinIndices || !bindJoints) return;
-            // per-joint displacement = current handle position - bind, for every
-            // editable joint (covers dragged + rigidly-propagated descendants + live).
             const nJ = bindJoints.length;
-            const dx = new Float32Array(nJ), dy = new Float32Array(nJ), dz = new Float32Array(nJ);
+            // per-joint 3x3 rotation (row-major flat) + current joint position
+            const M = new Float32Array(nJ * 9);
+            const nx = new Float32Array(nJ), ny = new Float32Array(nJ), nz = new Float32Array(nJ);
             for (let j = 0; j < nJ; j++) {
+                _skM4.makeRotationFromQuaternion(jointRot[j] || _idQuat);
+                const e = _skM4.elements;              // column-major 4x4
+                const o = j * 9;
+                M[o]   = e[0]; M[o+1] = e[4]; M[o+2] = e[8];
+                M[o+3] = e[1]; M[o+4] = e[5]; M[o+5] = e[9];
+                M[o+6] = e[2]; M[o+7] = e[6]; M[o+8] = e[10];
                 const s = jointSpheres[j];
-                if (!s) continue;
-                dx[j] = s.position.x - bindJoints[j][0];
-                dy[j] = s.position.y - bindJoints[j][1];
-                dz[j] = s.position.z - bindJoints[j][2];
+                nx[j] = s ? s.position.x : bindJoints[j][0];
+                ny[j] = s ? s.position.y : bindJoints[j][1];
+                nz[j] = s ? s.position.z : bindJoints[j][2];
             }
-            const attr = bodyMesh.geometry.attributes.position;
-            const out = attr.array;
+            const out = bodyMesh.geometry.attributes.position.array;
             const V = meshBaseVerts.length / 3;
             for (let v = 0; v < V; v++) {
-                let ox = 0, oy = 0, oz = 0;
+                const t = v * 3;
+                const bx = meshBaseVerts[t], by = meshBaseVerts[t + 1], bz = meshBaseVerts[t + 2];
+                let ax = 0, ay = 0, az = 0;
                 const b = v * skinK;
                 for (let k = 0; k < skinK; k++) {
                     const j = skinIndices[b + k], w = skinWeights[b + k];
-                    ox += w * dx[j]; oy += w * dy[j]; oz += w * dz[j];
+                    const rx = bx - bindJoints[j][0], ry = by - bindJoints[j][1], rz = bz - bindJoints[j][2];
+                    const o = j * 9;
+                    ax += w * (M[o]   * rx + M[o+1] * ry + M[o+2] * rz + nx[j]);
+                    ay += w * (M[o+3] * rx + M[o+4] * ry + M[o+5] * rz + ny[j]);
+                    az += w * (M[o+6] * rx + M[o+7] * ry + M[o+8] * rz + nz[j]);
                 }
-                const t = v * 3;
-                out[t]     = meshBaseVerts[t]     + ox;
-                out[t + 1] = meshBaseVerts[t + 1] + oy;
-                out[t + 2] = meshBaseVerts[t + 2] + oz;
+                out[t] = ax; out[t + 1] = ay; out[t + 2] = az;
             }
-            attr.needsUpdate = true;
+            bodyMesh.geometry.attributes.position.needsUpdate = true;
             bodyMesh.geometry.computeVertexNormals();
         }
 
@@ -604,8 +626,9 @@
         function undoLast() {
             const pre = undoStack.pop();
             if (!pre) { setStatus("Nothing to undo"); return; }
-            for (const { idx, pos } of pre.joints) {
+            for (const { idx, pos, rot } of pre.joints) {
                 if (jointSpheres[idx]) jointSpheres[idx].position.fromArray(pos);
+                if (jointRot[idx] && rot) jointRot[idx].fromArray(rot);
             }
             movedTargets.clear();
             for (const [k, v] of pre.moved) movedTargets.set(k, v.slice());

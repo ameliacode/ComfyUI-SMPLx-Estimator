@@ -1,6 +1,6 @@
 [project]
 name = "comfyui-smplx-estimator"
-version = "1.0.4"
+version = "1.0.5"
 description = "Single-image SMPL-X estimation for ComfyUI (NLF / Multi-HMR / WiLoR) with an interactive 3D SMPL-X editor and control-map / mesh export."
 license = { file = "LICENSE" }
 requires-python = ">=3.10"

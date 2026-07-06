@@ -12,6 +12,9 @@ def _to_img(t):
     return (t.clamp(0, 1).cpu().numpy() * 255).astype(np.uint8)
 
 
+_WARNED_NO_P3D = False
+
+
 def render_maps(verts_np, faces_np, device, size=512, azim=0.0, ground=True,
                 camera=None):
     """
@@ -25,12 +28,26 @@ def render_maps(verts_np, faces_np, device, size=512, azim=0.0, ground=True,
     world space as ``verts_np``. When given, the render is taken from that exact
     viewpoint (eye/at/up fed to look_at_view_transform) so the output matches the
     editor viewport. Auto framing is skipped.
+
+    Rasterization uses PyTorch3D. If it isn't installed (no prebuilt wheel for your
+    torch/CUDA), the maps come back blank with a one-time warning — estimation and
+    the interactive 3D editor still work, only the rendered maps are unavailable.
     """
-    from pytorch3d.structures import Meshes
-    from pytorch3d.renderer import (
-        look_at_view_transform, FoVPerspectiveCameras,
-        RasterizationSettings, MeshRasterizer,
-    )
+    try:
+        from pytorch3d.structures import Meshes
+        from pytorch3d.renderer import (
+            look_at_view_transform, FoVPerspectiveCameras,
+            RasterizationSettings, MeshRasterizer,
+        )
+    except Exception:
+        global _WARNED_NO_P3D
+        if not _WARNED_NO_P3D:
+            print("[render] PyTorch3D not available — pose/depth/normal/canny maps will be "
+                  "blank. Install PyTorch3D to enable rendering: "
+                  "https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md")
+            _WARNED_NO_P3D = True
+        blank = np.zeros((size, size, 3), np.uint8)
+        return blank, blank.copy(), blank.copy(), blank.copy()
 
     V = torch.as_tensor(np.asarray(verts_np), dtype=torch.float32, device=device)
     Fc = torch.as_tensor(np.asarray(faces_np).astype(np.int64), device=device)

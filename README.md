@@ -55,6 +55,11 @@ python install.py
 
 Restart ComfyUI after installation.
 
+> **Control maps need [PyTorch3D](https://github.com/facebookresearch/pytorch3d/blob/main/INSTALL.md).**
+> It isn't in `requirements.txt` (no universal wheel — tricky on Python 3.10+/newer torch/CUDA). Without
+> it, estimation and the interactive 3D editor still work, but the `pose`/`depth`/`normal`/`canny`
+> outputs come back blank. Install a PyTorch3D build matching your torch/CUDA to enable the maps.
+
 ## Models & weights
 
 Weights are **not bundled** (size + licensing). Download what you need and place it

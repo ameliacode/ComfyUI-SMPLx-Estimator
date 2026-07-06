@@ -27,10 +27,10 @@ set -uo pipefail
 COMFY_DIR="/home/wswg3/github/ComfyUI"
 PY="$COMFY_DIR/venv/bin/python3.10"
 LOG="/tmp/comfyui.log"
-REPO="/home/wswg3/project/comfyui-mocap"
+REPO="/home/wswg3/project/comfyui-smplx-estimator"
 HOST="127.0.0.1"
 PORT="8188"
-NODE_FOLDER="comfyui-mocap"
+NODE_FOLDER="comfyui-smplx-estimator"
 EXPECTED_NODES=("LoadSMPLX" "LoadNLF" "LoadMultiHMR" "LoadWiLoR" "NLFSMPLXEstimator" "MultiHMREstimator" "WiLoRHandEstimator" "SMPLXEditor" "ExportMesh")
 READY_TIMEOUT=90   # seconds to wait for the server to answer
 

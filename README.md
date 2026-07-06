@@ -99,11 +99,6 @@ estimator is non-commercial**:
 You must obtain each model from its official source and comply with its license. Do not use this
 package or its outputs commercially. See each project below for full terms.
 
-## Publishing
-
-A GitHub Actions workflow publishes to the Comfy Registry on `v*` tags. Set `COMFY_API_KEY`
-in repository secrets and confirm `pyproject.toml` metadata before tagging.
-
 ## Support
 
 - Questions → [GitHub Discussions](https://github.com/ameliacode/ComfyUI-SMPLx-Estimator/discussions)

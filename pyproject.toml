@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/ameliacode/comfyui-mocap"
+Repository = "https://github.com/ameliacode/ComfyUI-SMPLx-Estimator"
 
 [tool.comfy]
 PublisherId = "ameliacode"

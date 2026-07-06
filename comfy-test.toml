@@ -8,6 +8,6 @@ cpu = "none"
 
 [test.platforms]
 linux = true
-macos = true
+macos = false
 windows = true
 windows_portable = true

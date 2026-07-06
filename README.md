@@ -9,6 +9,9 @@ model from one photo, refine it in an interactive 3D editor, and export ControlN
 maps or a mesh. Bring your own estimator: **NLF** (robust body), **Multi-HMR**
 (expressive whole-body), and **WiLoR** (dedicated hands).
 
+
+![](assets/figure1.jpg)
+
 ```
 Load SMPLx ─smplx_model─┬─► Load NLF ─model─► Body: NLF ─┐
                         └─► Load Multi-HMR ─model─► Full Body: Multi-HMR ─┤

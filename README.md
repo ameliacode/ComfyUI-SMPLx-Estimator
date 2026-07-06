@@ -93,6 +93,7 @@ or fetch from a HuggingFace repo (`model_source = huggingface`, with an optional
 - Python 3.10+, PyTorch 2.x
 - A CUDA GPU is recommended. **NLF requires a CUDA GPU** (no CPU support); **Multi-HMR** and **WiLoR** also run on CPU (and fall back automatically if the GPU runs out of memory).
 - Dependencies in [`requirements.txt`](requirements.txt) (installed by `install.py` / on first run).
+---
 
 ## License
 
@@ -104,11 +105,6 @@ non-commercial**, so in practice this package and its outputs are **research / n
 
 Obtain each model from its official source and comply with its license. Do not use this package or
 its outputs commercially.
-
-## Support
-
-- Questions → [GitHub Discussions](https://github.com/ameliacode/ComfyUI-SMPLx-Estimator/discussions)
-- Bugs → [GitHub Issues](https://github.com/ameliacode/ComfyUI-SMPLx-Estimator/issues)
 
 ## Credits
 

@@ -106,12 +106,15 @@ def _resolve_hand_edit_impl(smplx_dict, targets, model, device, *,
     left_active = any(25 <= i < 40 for i in idxs)
     right_active = any(40 <= i < 55 for i in idxs)
 
-    lh = lh0.clone(); rh = rh0.clone()
+    lh = lh0.clone()
+    rh = rh0.clone()
     params = []
     if left_active:
-        lh.requires_grad_(True); params.append(lh)
+        lh.requires_grad_(True)
+        params.append(lh)
     if right_active:
-        rh.requires_grad_(True); params.append(rh)
+        rh.requires_grad_(True)
+        params.append(rh)
     if not params:
         return smplx_dict
 

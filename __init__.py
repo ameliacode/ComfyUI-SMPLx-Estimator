@@ -9,9 +9,11 @@ NODE_DISPLAY_NAME_MAPPINGS = {
     "LoadNLF": "Load NLF",
     "LoadMultiHMR": "Load Multi-HMR",
     "LoadWiLoR": "Load WiLoR",
+    "LoadSMIRK": "Load SMIRK",
     "NLFSMPLXEstimator": "Body: NLF",
     "MultiHMREstimator": "Full Body: Multi-HMR",
     "WiLoRHandEstimator": "Hand: WiLoR",
+    "SMIRKFaceEstimator": "Face: SMIRK",
     "SMPLXEditor": "SMPL-X Editor",
     "ExportMesh": "Export Mesh",
 }

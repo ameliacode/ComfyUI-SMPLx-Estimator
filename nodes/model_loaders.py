@@ -21,10 +21,11 @@ import torch
 from ..modules.nlf.estimate import load_nlf
 from ..modules.multihmr.estimate import load_multihmr
 from ..modules.wilor.estimate import load_wilor
+from ..modules.smirk.estimate import load_smirk
 from ..modules.smplx_fit.model import resolve_device, DEFAULT_SMPLX_PARENT, _resolve_model_parent
 
 # Register model folders (ComfyUI convention) so weights live under models/<key>/.
-for _k in ("smplx", "nlf", "multihmr", "wilor"):
+for _k in ("smplx", "nlf", "multihmr", "wilor", "smirk"):
     try:
         _d = os.path.join(folder_paths.models_dir, _k)
         os.makedirs(_d, exist_ok=True)
@@ -289,4 +290,31 @@ class LoadWiLoR:
         def _do(dev):
             net, cfg, det = load_wilor(ckpt, detp, dev)
             return ({"model": net, "cfg": cfg, "detector": det, "device": dev},)
+        return _oom_fallback(resolve_device(device), _do)
+
+
+class LoadSMIRK:
+    REPO_ID = ""   # HF repo hosting SMIRK_em1.pt
+    CKPT = "SMIRK_em1.pt"
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {"required": {
+            "model_source": (["local", "huggingface"], {"default": "local"}),
+            "model_path": ("STRING", {"default": _local_dir("smirk"), "tooltip": _PATH_TIP}),
+            "hf_token": ("STRING", {"default": "", "tooltip": "HuggingFace access token."}),
+            "device": (_DEVICES, {"default": "auto"}),
+        }}
+
+    RETURN_TYPES = ("SMIRK_MODEL",)
+    RETURN_NAMES = ("model",)
+    FUNCTION = "load"
+    CATEGORY = "SMPLx Estimator/loaders"
+
+    def load(self, model_source, model_path, hf_token, device):
+        ckpt = _resolve_weight("smirk", self.REPO_ID, model_source, model_path, hf_token, self.CKPT)
+
+        def _do(dev):
+            net = load_smirk(ckpt, dev)
+            return ({"model": net, "device": dev},)
         return _oom_fallback(resolve_device(device), _do)

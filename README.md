@@ -7,7 +7,7 @@
 Single-image **SMPL-X** estimation for ComfyUI — recover an expressive whole-body
 model from one photo, refine it in an interactive 3D editor, and export ControlNet
 maps or a mesh. Bring your own estimator: **NLF** (robust body), **Multi-HMR**
-(expressive whole-body), and **WiLoR** (dedicated hands).
+(expressive whole-body), **WiLoR** (dedicated hands), and **SMIRK** (dedicated face).
 
 
 ![](assets/figure1.jpg)
@@ -16,6 +16,7 @@ maps or a mesh. Bring your own estimator: **NLF** (robust body), **Multi-HMR**
 Load SMPLx ─smplx_model─┬─► Load NLF ─model─► Body: NLF ─┐
                         └─► Load Multi-HMR ─model─► Full Body: Multi-HMR ─┤
 Load WiLoR ─model─► Hand: WiLoR ──(smplx_hands)──► Body: NLF               │
+Load SMIRK ─model─► Face: SMIRK ──(smplx_face)───► Body: NLF               │
                                                                          ▼
                                          SMPL-X Editor ─mesh_data─► Export Mesh
                                          └─► pose / depth / normal / canny
@@ -29,9 +30,11 @@ Load WiLoR ─model─► Hand: WiLoR ──(smplx_hands)──► Body: NLF    
 | **Load NLF** | Loads the NLF estimator → `model`. |
 | **Load Multi-HMR** | Loads the Multi-HMR estimator → `model`. |
 | **Load WiLoR** | Loads the WiLoR hand model + detector → `model`. |
-| **Body: NLF** | Robust single-image body → SMPL-X (neutral shape, flat hands). Optional `smplx_hands`. |
+| **Load SMIRK** | Loads the SMIRK expression encoder → `model`. |
+| **Body: NLF** | Robust single-image body → SMPL-X (neutral shape, flat hands). Optional `smplx_hands`, `smplx_face`. |
 | **Full Body: Multi-HMR** | One-pass expressive whole-body SMPL-X (body + hands + face). |
 | **Hand: WiLoR** | In-the-wild hand reconstruction → SMPL-X hand pose (feeds `smplx_hands`). |
+| **Face: SMIRK** | Dedicated face expression capture → SMPL-X jaw + expression (feeds `smplx_face`). |
 | **SMPL-X Editor** | Interactive 3D editor: drag body/finger joints (IK), edit betas/expression, render `pose`/`depth`/`normal`/`canny` from the viewport. Outputs `mesh_data`. |
 | **Export Mesh** | Writes `mesh_data` to `obj` / `ply` / `glb` in the output folder → `file_path`. |
 
@@ -69,6 +72,7 @@ or fetch from a HuggingFace repo (`model_source = huggingface`, with an optional
 | **Multi-HMR** | `multiHMR_896_L.pt` | `models/multihmr/` | NAVER non-commercial | [naver/multi-hmr](https://github.com/naver/multi-hmr) (accept license) |
 | **WiLoR** | `wilor_final.ckpt`, `detector.pt` | `models/wilor/` | CC-BY-NC-ND | [WiLoR on HuggingFace](https://huggingface.co/spaces/rolpotamias/WiLoR) |
 | **MANO** *(for WiLoR)* | `MANO_LEFT.pkl`, `MANO_RIGHT.pkl` | `<node>/vendor/WiLoR/mano_data/` | MPI — **registration** | [mano.is.tue.mpg.de](https://mano.is.tue.mpg.de/) |
+| **SMIRK** | `SMIRK_em1.pt` | `models/smirk/` | MIT (code) · drives FLAME (non-commercial) | [georgeretsi/smirk](https://github.com/georgeretsi/smirk) |
 
 > **SMPL-X and MANO are registration-walled** and cannot be auto-downloaded — register, then
 > place the files manually. The loaders raise a clear message pointing you here if a file is missing.
@@ -80,6 +84,7 @@ or fetch from a HuggingFace repo (`model_source = huggingface`, with an optional
    - **Load NLF → Body: NLF** for robust body/global pose (GPU-only), or
    - **Load Multi-HMR → Full Body: Multi-HMR** for body + hands + expression in one pass (runs on CPU too).
 3. *(Optional, for sharp hands with NLF)* **Load WiLoR → Hand: WiLoR**, and wire its output into **Body: NLF**'s `smplx_hands`.
+   *(Optional, for facial expression with NLF)* **Load SMIRK → Face: SMIRK** on a face crop, and wire its output into **Body: NLF**'s `smplx_face`.
 4. Feed the estimator's `smplx` into the **SMPL-X Editor**:
    - Drag body / finger joints (IK re-solves), edit `betas` (shape) and `expression`.
    - Orbit the camera — the `pose`/`depth`/`normal`/`canny` outputs render from that viewpoint (ControlNet-ready).
@@ -102,6 +107,7 @@ third-party weights, each under its own license:
 - **Multi-HMR** — NAVER Corp. · CC BY-NC-SA 4.0 · [repo](https://github.com/naver/multi-hmr) · *Multi-HMR* (ECCV 2024)
 - **WiLoR** — Potamias et al. · CC BY-NC-ND 4.0 (no derivatives) · [repo](https://github.com/rolpotamias/WiLoR) · *WiLoR* (2024)
 - **NLF** — Sárándi & Pons-Moll · CC BY-NC 4.0 · [repo](https://github.com/isarandi/nlf) · *Neural Localizer Fields* (NeurIPS 2024)
+- **SMIRK** — Retsinas et al. · MIT code (drives non-commercial FLAME) · [repo](https://github.com/georgeretsi/smirk) · *SMIRK* (CVPR 2024)
 - **SMPL-X / MANO** — Max Planck Institute — registration-walled · [smpl-x](https://smpl-x.is.tue.mpg.de/) · [mano](https://mano.is.tue.mpg.de/)
 
 ## Acknowledgements

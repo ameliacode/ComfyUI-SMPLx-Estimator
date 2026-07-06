@@ -87,29 +87,45 @@ or fetch from a HuggingFace repo (`model_source = huggingface`, with an optional
 > **Quick start:** drag [`example_workflows/smplx_multihmr_example.json`](example_workflows/smplx_multihmr_example.json)
 > into ComfyUI, drop in your own image (replace `example.png`), and Queue.
 
-## Requirements
-
-- ComfyUI (recent version)
-- Python 3.10+, PyTorch 2.x
-- A CUDA GPU is recommended. **NLF requires a CUDA GPU** (no CPU support); **Multi-HMR** and **WiLoR** also run on CPU (and fall back automatically if the GPU runs out of memory).
-- Dependencies in [`requirements.txt`](requirements.txt) (installed by `install.py` / on first run).
----
-
 ## License
 
-The wrapper code in this repo is **MIT** ([LICENSE](LICENSE)). However, **every model it uses is
-non-commercial**, so in practice this package and its outputs are **research / non-commercial only**:
+Wrapper code: **MIT** ([LICENSE](LICENSE)). Otherwise this project follows the licenses of the models
+it vendors and uses — all **non-commercial** (see [Attribution](#attribution)) — so the package and
+its outputs are for **research / non-commercial use only**.
 
-- **NLF** — CC-BY-NC · **Multi-HMR** — NAVER non-commercial · **WiLoR** — CC-BY-NC-ND
-- **SMPL-X / MANO** — Max Planck license (registration)
+## Attribution
 
-Obtain each model from its official source and comply with its license. Do not use this package or
-its outputs commercially.
+This package **vendors** third-party estimator source (cloned into `vendor/` by `install.py`) and
+loads third-party model weights. Each is the work of its original authors and is used under its own
+**non-commercial** license — please cite and comply with the originals.
 
-## Credits
+**Multi-HMR** — NAVER Corp.
+- Repository: https://github.com/naver/multi-hmr
+- Vendored at: `vendor/multi-hmr/` (cloned on install)
+- License: NAVER non-commercial (CC BY-NC-SA 4.0)
+- Paper: *Multi-HMR: Multi-Person Whole-Body Human Mesh Recovery in a Single Shot* (ECCV 2024)
 
-- [NLF](https://github.com/isarandi/nlf) — Neural Localizer Fields for robust body recovery (Sárándi & Pons-Moll, NeurIPS 2024)
-- [Multi-HMR](https://github.com/naver/multi-hmr) — Multi-Human Mesh Recovery, expressive whole-body SMPL-X (NAVER, ECCV 2024)
-- [WiLoR](https://github.com/rolpotamias/WiLoR) — in-the-wild hand reconstruction (Potamias et al., 2024)
-- [SMPL-X](https://smpl-x.is.tue.mpg.de/) · [MANO](https://mano.is.tue.mpg.de/) — parametric body / hand models (MPI)
+**WiLoR** — Potamias et al.
+- Repository: https://github.com/rolpotamias/WiLoR
+- Vendored at: `vendor/WiLoR/` (cloned on install)
+- License: CC BY-NC-ND 4.0 (non-commercial, **no derivatives**)
+- Paper: *WiLoR: End-to-end 3D Hand Localization and Reconstruction in-the-wild* (2024)
+
+**NLF** — Sárándi & Pons-Moll
+- Repository: https://github.com/isarandi/nlf
+- Used as the released TorchScript model (loaded from `models/nlf/`)
+- License: CC BY-NC 4.0
+- Paper: *Neural Localizer Fields for Continuous 3D Human Pose and Shape Estimation* (NeurIPS 2024)
+
+**SMPL-X / MANO** — Max Planck Institute for Intelligent Systems — registration-walled body / hand
+models ([smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de/) · [mano.is.tue.mpg.de](https://mano.is.tue.mpg.de/)).
+
+Unlike permissively-licensed projects, these models are **non-commercial** (and WiLoR is
+**no-derivatives**), so the vendored code is redistributed only as permitted by each license —
+i.e. use, reproduction, and distribution for **research / non-commercial** purposes. We gratefully
+acknowledge these authors for making their work available to the research community.
+
+## Acknowledgements
+
 - 3D viewer based on [comfy-3d-viewers](https://github.com/PozzettiAndrea/comfy-3d-viewers); editor UI inspired by [ComfyUI-SAM3DBody](https://github.com/PozzettiAndrea/ComfyUI-SAM3DBody)
+- Model authors are credited in [Attribution](#attribution) above.

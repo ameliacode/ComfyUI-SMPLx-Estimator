@@ -81,6 +81,9 @@ or fetch from a HuggingFace repo (`model_source = huggingface`, with an optional
    - Orbit the camera — the `pose`/`depth`/`normal`/`canny` outputs render from that viewpoint (ControlNet-ready).
 5. Connect the editor's `mesh_data` to **Export Mesh** to save an `.obj` / `.ply` / `.glb`.
 
+> **Quick start:** drag [`example_workflows/smplx_multihmr_example.json`](example_workflows/smplx_multihmr_example.json)
+> into ComfyUI, drop in your own image (replace `example.png`), and Queue.
+
 ## Requirements
 
 - ComfyUI (recent version)

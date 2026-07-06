@@ -1,8 +1,10 @@
 [test]
 levels = ["syntax", "install", "registration", "instantiation"]
 
+# Example workflows need registration-walled weights (SMPL-X / MANO) and, for NLF,
+# a GPU — CI can't run them, so keep CI to import/registration/instantiation only.
 [test.workflows]
-cpu = "all"
+cpu = "none"
 
 [test.platforms]
 linux = true

@@ -1,0 +1,39 @@
+MIT License
+
+Copyright (c) 2026 ameliacode
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+--------------------------------------------------------------------------------
+
+THIRD-PARTY MODELS (NON-COMMERCIAL)
+
+The MIT license above covers ONLY the wrapper code in this repository. The
+machine-learning models this package loads are third-party and are NOT included;
+each is distributed under its own NON-COMMERCIAL license, which you must accept
+and comply with by obtaining the weights from the original source:
+
+  - NLF (Neural Localizer Fields)  — CC-BY-NC — github.com/isarandi/nlf
+  - Multi-HMR                       — NAVER non-commercial — github.com/naver/multi-hmr
+  - WiLoR                           — CC-BY-NC-ND — github.com/rolpotamias/WiLoR
+  - SMPL-X                          — Max Planck (registration) — smpl-x.is.tue.mpg.de
+  - MANO                            — Max Planck (registration) — mano.is.tue.mpg.de
+
+Because every model is non-commercial, this package and its outputs are for
+research / non-commercial use only. Do not use them commercially.

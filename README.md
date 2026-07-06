@@ -90,14 +90,14 @@ or fetch from a HuggingFace repo (`model_source = huggingface`, with an optional
 
 ## License
 
-This wrapper code is provided for **research / non-commercial** use, because **every bundled
-estimator is non-commercial**:
+The wrapper code in this repo is **MIT** ([LICENSE](LICENSE)). However, **every model it uses is
+non-commercial**, so in practice this package and its outputs are **research / non-commercial only**:
 
 - **NLF** — CC-BY-NC · **Multi-HMR** — NAVER non-commercial · **WiLoR** — CC-BY-NC-ND
-- **SMPL-X / MANO** — MPI license (registration; see their terms)
+- **SMPL-X / MANO** — Max Planck license (registration)
 
-You must obtain each model from its official source and comply with its license. Do not use this
-package or its outputs commercially. See each project below for full terms.
+Obtain each model from its official source and comply with its license. Do not use this package or
+its outputs commercially.
 
 ## Support
 

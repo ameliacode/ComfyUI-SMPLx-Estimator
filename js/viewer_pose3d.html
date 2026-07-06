@@ -36,9 +36,13 @@
             z-index: 10;
         }
         #controls {
-            flex: 0 0 auto;            /* natural height — shows every control, no scroll */
-            background: rgba(26, 26, 26, 0.95);
+            flex: 0 0 auto;            /* pinned at the bottom; viewer takes the rest */
+            position: sticky;
+            bottom: 0;
+            z-index: 5;
+            background: rgba(26, 26, 26, 0.96);
             border-top: 1px solid #444;
+            box-shadow: 0 -6px 12px rgba(0, 0, 0, 0.25);
             padding: 6px 8px;
             color: #ddd;
             font-size: 11px;
@@ -47,7 +51,8 @@
             align-content: flex-start;
             align-items: center;
             gap: 4px 10px;
-            overflow: visible;
+            max-height: 45%;           /* never eats more than ~half — viewer stays usable */
+            overflow-y: auto;
             box-sizing: border-box;
         }
         #controls > div:has(strong) { display: none; }   /* node already labels it */
@@ -305,6 +310,7 @@
         let editorActive = false;
         let bodyMesh = null;              // SMPL-X surface mesh
         const movedTargets = new Map();   // directly-dragged jointIdx -> [x,y,z]
+        const undoStack = [];             // pre-edit snapshots for Ctrl+Z
         let dragBase = null;              // {start, desc:[{c,pos}]} captured at drag start
         // Live soft-skinning state: base (undeformed) verts + per-vertex skin
         // (top-k jointIdx/weight in 0-54 space) + bind joint positions (all 55).
@@ -386,16 +392,36 @@
         function beginDrag() {
             const s = tcontrols.object;
             if (!s) { dragBase = null; return; }
+            const desc = descendantsOf(s.userData.jointIdx);
             dragBase = {
                 start: s.position.clone(),
-                desc: descendantsOf(s.userData.jointIdx)
-                          .map(c => ({ c, pos: jointSpheres[c].position.clone() })),
+                startQuat: s.quaternion.clone(),     // for rotate mode
+                pivot: s.position.clone(),           // rotation pivot = the joint
+                desc: desc.map(c => ({ c, pos: jointSpheres[c].position.clone() })),
+                // snapshot BEFORE this edit, for Ctrl+Z
+                pre: {
+                    joints: [s.userData.jointIdx, ...desc].map(idx => ({
+                        idx, pos: jointSpheres[idx].position.toArray(),
+                    })),
+                    moved: [...movedTargets.entries()].map(([k, v]) => [k, v.slice()]),
+                },
             };
         }
+        // Move mode: descendants translate by the same delta. Rotate mode: descendants
+        // orbit the joint by the gizmo's rotation (IK reproduces it on re-queue).
         function dragPropagate() {
             if (!dragBase || !tcontrols.object) return;
-            const d = tcontrols.object.position.clone().sub(dragBase.start);
-            for (const { c, pos } of dragBase.desc) jointSpheres[c].position.copy(pos).add(d);
+            const s = tcontrols.object;
+            if (tcontrols.mode === "rotate") {
+                const dq = s.quaternion.clone().multiply(dragBase.startQuat.clone().invert());
+                for (const { c, pos } of dragBase.desc) {
+                    const rel = pos.clone().sub(dragBase.pivot).applyQuaternion(dq);
+                    jointSpheres[c].position.copy(dragBase.pivot).add(rel);
+                }
+            } else {
+                const d = s.position.clone().sub(dragBase.start);
+                for (const { c, pos } of dragBase.desc) jointSpheres[c].position.copy(pos).add(d);
+            }
         }
 
         function setPoseEditor(pose3d) {
@@ -547,17 +573,68 @@
 
         function onDragRelease() {
             const s = tcontrols.object;
+            if (!s) { dragBase = null; return; }
+            if (dragBase) {                                 // record for undo
+                undoStack.push(dragBase.pre);
+                if (undoStack.length > 100) undoStack.shift();
+            }
+            if (tcontrols.mode === "rotate") {
+                // the joint itself didn't move; its descendants did -> target those
+                for (const { c } of (dragBase ? dragBase.desc : [])) {
+                    const sp = jointSpheres[c];
+                    if (!sp) continue;
+                    sp.material = matMoved;
+                    movedTargets.set(c, [sp.position.x, sp.position.y, sp.position.z]);
+                }
+            } else {
+                s.material = matMoved;                      // mark edited
+                movedTargets.set(s.userData.jointIdx, [s.position.x, s.position.y, s.position.z]);
+            }
             dragBase = null;
-            if (!s) return;
-            const i = s.userData.jointIdx;
-            s.material = matMoved;                          // mark edited
-            movedTargets.set(i, [s.position.x, s.position.y, s.position.z]);
+            emitCorrections();
+        }
+
+        function emitCorrections() {
             const corrections = {};
             for (const [idx, xyz] of movedTargets) corrections[String(idx)] = xyz;
             window.parent.postMessage({ type: "POSE3D_CORRECTIONS", corrections }, "*");
         }
 
+        // Ctrl+Z: revert the last joint edit (position + moved-set + materials).
+        function undoLast() {
+            const pre = undoStack.pop();
+            if (!pre) { setStatus("Nothing to undo"); return; }
+            for (const { idx, pos } of pre.joints) {
+                if (jointSpheres[idx]) jointSpheres[idx].position.fromArray(pos);
+            }
+            movedTargets.clear();
+            for (const [k, v] of pre.moved) movedTargets.set(k, v.slice());
+            for (const sp of pickableSpheres) {
+                const i = sp.userData.jointIdx;
+                if (movedTargets.has(i)) { sp.material = matMoved; }
+                else { sp.material = (i >= 25 ? matFinger : matIdle).clone(); sp.material.depthTest = false; }
+            }
+            updateEditorBones();
+            applySkinning();
+            emitCorrections();
+            setStatus("Undid last edit");
+        }
+
         renderer.domElement.addEventListener("pointerdown", onPointerDown);
+
+        // ── keyboard: W = move, R = rotate, Ctrl+Z = undo ──────────────────────
+        window.addEventListener("keydown", (e) => {
+            if ((e.ctrlKey || e.metaKey) && (e.key === "z" || e.key === "Z")) {
+                e.preventDefault(); undoLast(); return;
+            }
+            const tag = e.target && e.target.tagName;
+            if (tag === "INPUT" || tag === "TEXTAREA") return;
+            if (e.key === "w" || e.key === "W") {
+                ensureTransformControls(); tcontrols.setMode("translate"); setStatus("Move mode (W)");
+            } else if (e.key === "r" || e.key === "R") {
+                ensureTransformControls(); tcontrols.setMode("rotate"); setStatus("Rotate mode (R)");
+            }
+        });
 
         // ── Camera sync ───────────────────────────────────────────────────────
         // Emit the editor camera (world-space eye/at/up + fov) so the node can

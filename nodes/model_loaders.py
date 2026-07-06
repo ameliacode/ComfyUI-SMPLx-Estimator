@@ -23,6 +23,15 @@ from ..modules.multihmr.estimate import load_multihmr
 from ..modules.wilor.estimate import load_wilor
 from ..modules.smplx_fit.model import resolve_device, DEFAULT_SMPLX_PARENT, _resolve_model_parent
 
+# Register model folders (ComfyUI convention) so weights live under models/<key>/.
+for _k in ("smplx", "nlf", "multihmr", "wilor"):
+    try:
+        _d = os.path.join(folder_paths.models_dir, _k)
+        os.makedirs(_d, exist_ok=True)
+        folder_paths.add_model_folder_path(_k, _d)
+    except Exception:
+        pass
+
 _GENDERS = ["neutral", "male", "female"]
 _DEVICES = ["auto", "cuda", "cpu"]
 

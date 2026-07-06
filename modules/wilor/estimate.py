@@ -23,7 +23,10 @@ import cv2
 import numpy as np
 import torch
 
-WILOR_DIR = "/home/wswg3/github/WiLoR"
+_PKG_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# WiLoR source (code + model_config.yaml + mano_data). install.py clones it into
+# vendor/WiLoR; override with the WILOR_DIR env var.
+WILOR_DIR = os.environ.get("WILOR_DIR", os.path.join(_PKG_ROOT, "vendor", "WiLoR"))
 DEFAULT_WILOR_CKPT = os.path.join(WILOR_DIR, "pretrained_models", "wilor_final.ckpt")
 DEFAULT_WILOR_DETECTOR = os.path.join(WILOR_DIR, "pretrained_models", "detector.pt")
 _CFG = os.path.join(WILOR_DIR, "pretrained_models", "model_config.yaml")

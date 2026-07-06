@@ -4,12 +4,15 @@ scipy
 torch
 torchvision
 smplx
-# Multi-HMR estimator deps (model code cloned to ~/github/multi-hmr, loaded by path)
+huggingface_hub
+# Multi-HMR estimator deps (source cloned by install.py into vendor/multi-hmr)
 einops
 roma
 pillow
-# WiLoR hand estimator deps (model code cloned to ~/github/WiLoR, loaded by path)
+# WiLoR hand estimator deps (source cloned by install.py into vendor/WiLoR)
 ultralytics
 yacs
 timm
 pytorch-lightning
+# Optional: GLB export in the Export Mesh node
+# trimesh

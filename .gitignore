@@ -17,3 +17,6 @@ checkpoints/
 .codex
 working_memory/
 sources/
+
+# Third-party model source (cloned by install.py)
+vendor/

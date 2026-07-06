@@ -24,9 +24,14 @@ import sys
 import numpy as np
 import torch
 
-MULTIHMR_DIR = "/home/wswg3/github/multi-hmr"
-DEFAULT_MULTIHMR_CKPT = "models/multiHMR/multiHMR_896_L.pt"   # relative to ComfyUI CWD
-_MEAN_PARAMS = "/home/wswg3/github/ComfyUI/models/smpl_mean_params.npz"
+_PKG_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# Multi-HMR source (model code). install.py clones it into vendor/multi-hmr;
+# override with the MULTIHMR_DIR env var.
+MULTIHMR_DIR = os.environ.get("MULTIHMR_DIR", os.path.join(_PKG_ROOT, "vendor", "multi-hmr"))
+DEFAULT_MULTIHMR_CKPT = "models/multihmr/multiHMR_896_L.pt"   # relative to ComfyUI CWD (fallback)
+# Small init placeholder shipped with the package (real means come from the checkpoint).
+_MEAN_PARAMS = os.environ.get("MULTIHMR_MEAN_PARAMS",
+                              os.path.join(_PKG_ROOT, "assets", "smpl_mean_params.npz"))
 
 _RFIX = np.array([[1, 0, 0], [0, -1, 0], [0, 0, -1]], np.float32)   # OpenCV cam -> Y-up
 _cache: dict = {}

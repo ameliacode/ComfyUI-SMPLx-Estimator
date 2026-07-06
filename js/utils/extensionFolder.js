@@ -25,9 +25,19 @@ export const EXTENSION_FOLDER = (() => {
 
 /**
  * Build a cache-busted viewer URL, e.g. getViewerUrl("viewer_pose3d").
+ *
+ * Resolve it RELATIVE to this module's own URL (…/js/utils/extensionFolder.js) so it
+ * works no matter what the install folder is named (comfyui-smplx-estimator from the
+ * registry, ComfyUI-SMPLx-Estimator from a git-URL install, etc.) — no folder-name
+ * guessing / hardcoded fallback.
  * @param {string} viewerName - viewer HTML filename without extension
  * @returns {string}
  */
 export function getViewerUrl(viewerName) {
-    return `/extensions/${EXTENSION_FOLDER}/${viewerName}.html?v=` + Date.now();
+    try {
+        const url = new URL(`../${viewerName}.html`, import.meta.url);
+        return `${url.pathname}?v=${Date.now()}`;
+    } catch (_) {
+        return `/extensions/${EXTENSION_FOLDER}/${viewerName}.html?v=${Date.now()}`;
+    }
 }
